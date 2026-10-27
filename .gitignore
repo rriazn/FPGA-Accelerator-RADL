@@ -2,6 +2,12 @@
 data/
 build/
 
+# c binaries
+c/camus_naive_O0
+c/camus_naive_O2
+*.exe
+*.o
+
 # python
 __pycache__/
 *.pyc

@@ -97,10 +97,29 @@ Weights are int8 `[K][C][FY][FX]` row-major, biases int32 `[K]`, for each layer 
 | `weights.h` | C arrays `<layer>_w`, `<layer>_b`, plus `#define`s for dims, stride, pad, `<LAYER>_M0`, `<LAYER>_SHIFT`, `B1SKIP_*`, `POOL_N`, `fc_w[2][64]`, `fc_b[2]` |
 | `<layer>_w.mem`, `<layer>_b.mem` | same data as hex, one value per line (2 digits for weights, 8 for biases, two's complement), for BRAM init |
 | `quant_pkg.vhd` | VHDL package with `M0` / `SHIFT` constants per layer |
+| `layers.txt`, `fc_w.mem`, `fc_b.mem` | layer table (`name K C FY FX stride pad m0 shift`, plus `b1skip` and `fc` rows) and the FC weights; with the `.mem` files this is everything the C baseline loads |
 | `test_x.bin` | int8 `[200][112][112]`, the test frames, already quantized |
 | `test_y.bin` | uint8 `[200]`, labels (0 = 2CH, 1 = 4CH) |
 | `test_logits.bin` | little-endian int32 `[200][2]`, expected output of the int8 network |
 | `golden.npz` | int8 per-layer outputs (`gold_in`, `gold_stem`, `gold_b1h`, `gold_b1`, ...) of the first 4 test frames, for debugging a layer at a time |
+
+## Naive C baseline (`c/`)
+
+`c/camus_naive.c` is the RADL baseline: plain C11, libc only, one thread, straightforward loops with no tiling or SIMD. At run time it reads the layer table, weights and test set from `build/export/`, runs the int8 network on every test frame, and reports accuracy, latency (mean/min/max), frames over the 33 ms deadline, and whether every logit is **bit-exact** to `test_logits.bin` (exit code 1 if not). The ResNet-8 topology itself is fixed in the code.
+
+```sh
+cd c
+make run              # builds and runs camus_naive_O0 and camus_naive_O2 on ../build/export
+./camus_naive_O2 ../build/export 50   # 50 passes over the test set, e.g. for a long power measurement
+```
+
+Needs gcc and make; on the Ultra96 the same commands build a native aarch64 binary. Run `python/export.py` first (it writes `layers.txt`). On the Windows dev machine there is no C compiler, so it was built and run inside the `radl-tf1` Docker image:
+
+```powershell
+docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make run
+```
+
+Host results (x86 under Docker, not the A53, so only useful as a correctness check): bit-exact on all 200 frames, 95.5 % accuracy, 278 ms/frame at `-O0` and 65 ms/frame at `-O2`. The numbers that count come from running it on the board.
 
 ## Open points
 

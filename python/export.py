@@ -46,6 +46,16 @@ def main():
              % q['pool_n'])
     h.append(c_array('int8_t', 'fc_w', q['fc_w']) + c_array('int32_t', 'fc_b', q['fc_b']))
     vhd.append('end package;\n')
+    # layers.txt: one row per layer for runtime loaders; b1skip is the identity shortcut of block 1
+    rows = ['# name K C FY FX stride pad m0 shift  (weights: <name>_w.mem, biases: <name>_b.mem)\n']
+    for n, _, _, stride, pad in CONVS:
+        K, C, FY, FX = q[n + '_w'].shape
+        rows.append('%s %d %d %d %d %d %d %d %d\n' % (n, K, C, FY, FX, stride, pad, q[n + '_m0'], q[n + '_sh']))
+    rows.append('b1skip 0 0 0 0 0 0 %d %d\n' % (q['b1skip_m0'], q['b1skip_sh']))
+    rows.append('fc 2 64 1 1 0 0 0 0\n')
+    (OUT / 'layers.txt').write_text(''.join(rows))
+    (OUT / 'fc_w.mem').write_text(''.join('%02x\n' % v for v in q['fc_w'].ravel().view(np.uint8)))
+    (OUT / 'fc_b.mem').write_text(''.join('%08x\n' % v for v in q['fc_b'].view(np.uint32)))
     (OUT / 'weights.h').write_text(''.join(h))
     (OUT / 'quant_pkg.vhd').write_text(''.join(vhd))
 

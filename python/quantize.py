@@ -8,7 +8,7 @@ import numpy as np
 
 from data import BN_EPS, BUILD, DATA
 
-MULT_BITS = 16  # requant multiplier m0 width: acc(int32) * m0 fits two DSP48E2 multiplies
+MULT_BITS = 16  # requant multiplier m0 width; observed |acc| < 2^17 on the test set, so acc * m0 fits one 27x18 DSP48E2
 PCT = 100       # activation range = this percentile of |x| over the calibration set (100 = max)
 N_CALIB, N_GOLD = 256, 4
 

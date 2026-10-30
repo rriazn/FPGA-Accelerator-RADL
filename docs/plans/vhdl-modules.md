@@ -155,7 +155,7 @@ entity addr_gen is
 end entity;
 ```
 
-Where `iy = oy*stride - pad + fy`, `ix = ox*stride - pad + fx`. Test: exhaustive comparison with a Python or C model of the same formulas for ResNet-8 shapes plus the random layers from task 0.5.
+Where `iy = oy*stride - pad + fy`, `ix = ox*stride - pad + fx`. Implemented as a purely combinational process (no clock). When `o_x_valid = 0` (padding) `o_x_addr` is `in_base` and must not be used; the layout function is only evaluated for valid pixels, since it takes natural arguments. Weights are the plain `[K][C][FY][FX]` array and the bias and output are int32 (4 bytes). The unit testbench is `vhdl/tests/unit/compute-engine/tb_addr_gen.vhd`. Test: exhaustive comparison with a Python or C model of the same formulas for ResNet-8 shapes plus the random layers from task 0.5.
 
 ### `axi_master_rd` and `axi_master_wr` (task 2.3)
 
@@ -220,6 +220,10 @@ end entity;
 ```
 
 Latency is one clock: `o_acc` and `o_acc_valid` change on the edge that consumes the inputs. `o_acc_valid` is registered `i_en and i_last`, so it is 1 for exactly one cycle after the last term, and 0 when `i_en = 0`. The unit testbench is `vhdl/tests/unit/compute-engine/tb_mac_int8.vhd`. Bit-exact: int32 wrap-around must not occur for valid layers (observed |acc| < 2^17, see spec section 5).
+
+### `conv_core_v1` (task 2.1, first part)
+
+The engine core with plain synchronous memory ports instead of AXI: `loop_nest`, `addr_gen` and `mac_int8` wired together (`conv_core_v1.vhd`). The memories sample the addresses at a clock edge and return the data in the next cycle. The flags of each term (`first`, `last`, padding, last output, output address) travel through the same pipeline stages as its data, so they reach the MAC together with it. The result appears two cycles after the last term (cycles = MACs + 2) and is written as int32 together with its address. `o_x_rd` is 0 for padding positions, where the input must not be read and the MAC gets 0; the testbench memory returns poison data in that case. `conv_engine_v1` below wraps this core with the AXI master. The integration test is `vhdl/tests/integration/tb_conv_core_v1.vhd`, which runs a layer from the golden vectors and compares every accumulator.
 
 ### `conv_engine_v1` (task 2.1)
 

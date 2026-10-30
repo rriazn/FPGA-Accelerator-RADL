@@ -48,7 +48,7 @@ Phase 0  Spec + setup
 | 0.2 | Core, Sys | Set up tools: VHDL simulator, Vivado project skeleton for the Ultra96, board access, a way to run the C baseline on the A53. | 0.1 | working simulation + build flow |
 | 0.3 | Core, Sys | Write the interface spec: AXI-Lite register map (C, K, H, W, FY, FX, stride, pad, base addresses, requant m0/shift, skip m0/shift, ReLU/residual flags, start, done, cycle counter), data layouts, handshake with the ARM, who tiles what. Settle D2 and D3 here. | 0.1 | `spec` document |
 | 0.4 | Core | Performance and resource model for the PE configurations (1, 9, 144 MACs): cycle count per layer, BRAM and DSP use, DDR traffic. Rough first estimate for the 144-MAC array (16 output channels x 3x3 window, one input channel per cycle): about 304 k cycles per frame, 1.5 ms at 200 MHz, if the array is fully used. Check this estimate; 1x1 shortcut convs use only 16 of 144 MACs. Ultra96 ZU3EG has roughly 360 DSP and 216 BRAM36; verify against the datasheet. | 0.3 | model + chosen PE array shape |
-| 0.5 | Pipe | Extend the golden vectors for hardware: per-layer input, int32 accumulator and requantized output for a few frames, in a text or binary format VHDL testbenches can read. `golden.npz` today only has int8 layer outputs for 4 frames. Also write random-layer vectors (arbitrary C, K, H, W, kernel, stride, pad) for the generality test. | 0.3 | `export/` additions |
+| 0.5 | Pipe | Extend the golden vectors for hardware: per-layer input, int32 accumulator and requantized output for a few frames. **Format decided:** text files with one hex value per line, two's complement, like the exported `.mem` files. **Done for the network** (`build/export/golden/`, see README): frame 0 plus the frame with the largest \|acc\| (decided); for `c2` and shortcut layers the branch values before the add (`_rq`, option (a), decided), not the block output. `golden.npz` today only has int8 layer outputs for 4 frames. Also write random-layer vectors (arbitrary C, K, H, W, kernel, stride, pad) for the generality test. **Still to do, deferred (decided):** write them once 0.3 has fixed the supported ranges (kernel, stride, pad, maximum C/K/H/W) and open point 5 of the spec (lanes beyond K); not part of the first golden-vector export. | 0.3 | `export/` additions |
 
 ## Phase 1: Shared building blocks (VHDL)
 
@@ -56,7 +56,7 @@ Each block gets a testbench checked against the golden vectors. With D2, v1 need
 
 | ID | Area | Task | Needs | Output |
 |---|---|---|---|---|
-| 1.1 | Core | int8 x int8 MAC / PE with int32 accumulator (signed, zero point 0). | 0.3, 0.5 | `mac.vhd` + tb |
+| 1.1 | Core | int8 x int8 MAC / PE with int32 accumulator (signed, zero point 0). | 0.3, 0.5 | `mac_int8.vhd` + tb |
 | 1.2 | Core | Requant unit: `(acc * m0 + (1 << (shift-1))) >> shift`, round half up, then ReLU clip to 0..127. Bit-exact to `quantize.py`. | 0.3, 0.5 | `requant.vhd` + tb |
 | 1.3 | Core | Loop / address generator for runtime-sized layers (output pixel, input channel, window position, padding and stride handling, zero padding at borders). | 0.3 | `addrgen.vhd` + tb |
 | 1.4 | Sys | AXI-Lite register file for the map from 0.3, plus start/done and a free-running cycle counter. | 0.3 | `regs.vhd` + tb |

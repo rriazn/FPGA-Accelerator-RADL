@@ -5,6 +5,7 @@ build/
 # c binaries
 c/camus_naive_O0
 c/camus_naive_O2
+c/aarch64/
 *.exe
 *.o
 

@@ -102,6 +102,7 @@ Weights are int8 `[K][C][FY][FX]` row-major, biases int32 `[K]`, for each layer 
 | `test_y.bin` | uint8 `[200]`, labels (0 = 2CH, 1 = 4CH) |
 | `test_logits.bin` | little-endian int32 `[200][2]`, expected output of the int8 network |
 | `golden.npz` | int8 per-layer outputs (`gold_in`, `gold_stem`, `gold_b1h`, `gold_b1`, ...) of the first 4 test frames, for debugging a layer at a time |
+| `golden/f<frame>/` | hardware golden vectors for test frame 0 and the frame with the largest \|acc\| (currently 16, \|acc\| 89,677), hex like the `.mem` files, in the blocked layout `[C/16][H][W][16]` (the stem input is the plain `[H][W]` frame). Per conv layer: `<layer>_in.mem` (int8 input), `<layer>_acc.mem` (int32 accumulator incl. bias, what the v1 hardware writes), `<layer>_rq.mem` (int32 requant result before any clip); `b1skip_in`/`_rq` for block 1's identity shortcut. A layer's int8 output is the next layer's `_in`: `clip(rq, 0, 127)` for stem and `c1`, `clip(c2 rq + shortcut rq, 0, 127)` for a block |
 
 ## Naive C baseline (`c/`)
 
@@ -117,7 +118,10 @@ Needs gcc and make; on the Ultra96 the same commands build a native aarch64 bina
 
 ```powershell
 docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make run
+docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make package   # static aarch64 binaries in c/aarch64/ + build/board.tar.gz for the board
 ```
+
+On the board, `c/board_run.sh` records the conditions and runs both binaries pinned to one core; see `docs/board-session.md`.
 
 Host results (x86 under Docker, not the A53, so only useful as a correctness check): bit-exact on all 200 frames, 95.5 % accuracy, 278 ms/frame at `-O0` and 65 ms/frame at `-O2`. The numbers that count come from running it on the board.
 

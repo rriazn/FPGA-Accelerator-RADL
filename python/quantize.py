@@ -75,18 +75,24 @@ def requant(acc, m0, sh):
     return (acc.astype(np.int64) * m0 + (1 << (sh - 1))) >> sh
 
 
-def fwd_int(Q, x):
-    """x int8 [N][1][H][W] -> logits (int32 accumulators, argmax is the class), taps"""
+def fwd_int(Q, x, wide=False):
+    """x int8 [N][1][H][W] -> logits (int32 accumulators, argmax is the class), taps
+    wide: also tap <layer>_acc (int32 accumulator) and <layer>_rq (requant before any clip), for hardware golden vectors"""
     def qc(n, a):
         q = Q[n]
-        acc = conv(a.astype(np.float64), q['w'].astype(np.float64), q['stride'], q['pad'])
-        return requant(np.rint(acc) + q['b'][None, :, None, None], q['m0'], q['sh'])
+        acc = np.rint(conv(a.astype(np.float64), q['w'].astype(np.float64), q['stride'], q['pad'])) + q['b'][None, :, None, None]
+        y = requant(acc, q['m0'], q['sh'])
+        if wide:
+            t[n + '_acc'], t[n + '_rq'] = acc.astype(np.int64), y
+        return y
     relu8 = lambda a: np.clip(a, 0, 127)
     t = {'in': x}
     a = t['stem'] = relu8(qc('stem', x))
     for i in (1, 2, 3):
         h = t['b%dh' % i] = relu8(qc('b%dc1' % i, a))
         sc = requant(a, Q['b1skip']['m0'], Q['b1skip']['sh']) if i == 1 else qc('b%dsc' % i, a)
+        if wide and i == 1:
+            t['b1skip_rq'] = sc
         a = t['b%d' % i] = relu8(qc('b%dc2' % i, h) + sc)
     pooled = a.astype(np.int64).sum((2, 3))  # global pool as a sum; the 1/pool_n is folded into fc_b
     return pooled @ Q['fc']['w'].T.astype(np.int64) + Q['fc']['b'], t

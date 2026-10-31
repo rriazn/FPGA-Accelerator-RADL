@@ -4,7 +4,7 @@ Status: draft, written 2026-10-28. Everything marked **proposal** or **TBD** is 
 
 ## 1. Deliverable
 
-A baseline with measurements, due 2026-11-11. This plan reads it as the **software baseline: the naive plain-C int8 inference on one ARM A53 core of the Ultra96**, with latency, energy per frame and accuracy, and the measurement method written down (the plan's "benchmark against a naive implementation"). The hardware baseline (v1, 1 MAC, no buffering) is a stretch goal. **To confirm with the course requirements:** whether the deliverable means the software baseline, the v1 hardware, or both.
+A baseline with measurements, due 2026-11-11. This plan reads it as the **software baseline: the naive plain-C int8 inference on one ARM A53 core of the Ultra96**, with latency, energy per frame and accuracy, and the measurement method written down (the plan's "benchmark against a naive implementation"). **Decided:** speed (latency) is the main focus; energy per frame is measured and reported but is not a goal (D7 in `docs/plans/vhdl-accelerator-tasks.md`). The hardware baseline (v1, 1 MAC, no buffering) is a stretch goal. **To confirm with the course requirements:** whether the deliverable means the software baseline, the v1 hardware, or both.
 
 ## 2. Scope
 

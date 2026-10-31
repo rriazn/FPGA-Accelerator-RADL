@@ -1,11 +1,13 @@
 -- integration test: loop_nest + addr_gen + mac_int8 (conv_core_v1) against the hardware golden vectors
 -- the memories are VHDL arrays loaded from build/export, the int32 results are compared with <layer>_acc.mem
--- run from vhdl/ (GHDL, VHDL-2008), layer is stem, b1c1, b1c2, b2c1, b2c2, b2sc, b3c1, b3c2 or b3sc, frame is f000 or f016:
+-- run from vhdl/ (GHDL, VHDL-2008), layer is stem, b1c1, b1c2, b2c1, b2c2, b2sc, b3c1, b3c2 or b3sc, frame is f000 or f016
+-- G_STALL is the chance in percent that i_ce drops in a cycle, a stall lasts 1 to G_MAX_STALL cycles (0 = never stall)
 --   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/compute-engine/{loop_nest,addr_gen,mac_int8,conv_core_v1}.vhd tests/integration/tb_conv_core_v1.vhd
---   ghdl -r --std=08 --workdir=<dir> tb_conv_core_v1 -gG_LAYER=stem -gG_FRAME=f000
+--   ghdl -r --std=08 --workdir=<dir> tb_conv_core_v1 -gG_LAYER=stem -gG_FRAME=f000 -gG_STALL=30 -gG_MAX_STALL=8
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use ieee.math_real.all;
 use std.textio.all;
 
 use work.camus_pkg.all;
@@ -14,7 +16,9 @@ entity tb_conv_core_v1 is
     generic (
         G_LAYER  : string := "stem";
         G_FRAME  : string := "f000";
-        G_EXPORT : string := "../build/export"
+        G_EXPORT : string := "../build/export";
+        G_STALL  : natural := 0;
+        G_MAX_STALL : positive := 8
     );
 end entity tb_conv_core_v1;
 
@@ -53,6 +57,7 @@ architecture sim of tb_conv_core_v1 is
     constant C_OUTS  : natural := C_SHAPE.k * C_OH * C_OW;
 
     signal s_clk, s_rst, s_start : std_logic := '0';
+    signal s_ce : std_logic := '1';
     signal s_cfg : layer_cfg_t := (
         c => 1, k => 1, h => 1, w => 1, fy => 1, fx => 1, stride => 1, pad => 0,
         in_lanes => 16, out_lanes => 16,
@@ -63,7 +68,7 @@ architecture sim of tb_conv_core_v1 is
     signal s_x_addr, s_w_addr, s_b_addr, s_out_addr : unsigned(AXI_ADDR_W-1 downto 0);
     signal s_x_data, s_w_data : act_t := (others => '0');
     signal s_b_data, s_out_data : acc_t := (others => '0');
-    signal s_out_we, s_x_rd : std_logic;
+    signal s_out_we, s_x_rd, s_term_valid : std_logic;
     signal s_loaded, s_finished : boolean := false;
 begin
 
@@ -80,14 +85,40 @@ begin
 
     dut : entity work.conv_core_v1
         port map (
-            i_clk => s_clk, i_rst => s_rst, i_cfg => s_cfg, i_start => s_start,
+            i_clk => s_clk, i_rst => s_rst, i_ce => s_ce, i_cfg => s_cfg, i_start => s_start,
             o_busy => s_busy, o_done => s_core_done, o_cycles => s_cycles,
-            o_x_addr => s_x_addr, o_x_rd => s_x_rd, o_w_addr => s_w_addr, o_b_addr => s_b_addr,
+            o_term_valid => s_term_valid, o_x_addr => s_x_addr, o_x_rd => s_x_rd, o_w_addr => s_w_addr, o_b_addr => s_b_addr,
             i_x_data => s_x_data, i_w_data => s_w_data, i_b_data => s_b_data,
             o_out_we => s_out_we, o_out_addr => s_out_addr, o_out_data => s_out_data
         );
 
-    -- memories with a one cycle read latency, written results are compared when the core is done
+    -- random stalls, any cycle may be stalled including idle and flush cycles
+    stall_gen : process(s_clk)
+        variable v_seed1, v_seed2 : positive := 42;
+        variable v_r : real;
+        variable v_left : natural := 0;
+    begin
+        if rising_edge(s_clk) then
+            if G_STALL = 0 then
+                s_ce <= '1';
+            elsif v_left > 0 then
+                v_left := v_left - 1;
+                s_ce <= '0';
+            else
+                uniform(v_seed1, v_seed2, v_r);
+                if v_r * 100.0 < real(G_STALL) then
+                    uniform(v_seed1, v_seed2, v_r);
+                    v_left := integer(floor(v_r * real(G_MAX_STALL)));
+                    s_ce <= '0';
+                else
+                    s_ce <= '1';
+                end if;
+            end if;
+        end if;
+    end process stall_gen;
+
+    -- memories with a one cycle read latency that hold their data while s_ce = 0
+    -- written results are compared when the core is done
     memories : process
         type t_i8_mem is array (0 to C_MEM_SIZE - 1) of act_t;
         type t_i32_mem is array (0 to C_MEM_SIZE - 1) of acc_t;
@@ -96,7 +127,7 @@ begin
         variable v_b_mem, v_exp_mem, v_out_mem : t_i32_mem;
         variable v_written : t_bool_mem := (others => false);
         variable v_n_x, v_n_w, v_n_b, v_n_exp, v_idx : natural;
-        variable v_writes, v_errors, v_first_bad : natural := 0;
+        variable v_writes, v_errors, v_first_bad, v_ce_cycles : natural := 0;
 
         procedure load_i8(path : string; mem : inout t_i8_mem; n : out natural) is
             file f : text;
@@ -148,20 +179,25 @@ begin
 
         loop
             wait until rising_edge(s_clk);
+            if s_busy = '1' and s_ce = '1' then
+                v_ce_cycles := v_ce_cycles + 1;
+            end if;
             -- reads, the address is sampled now and the data shows up after this edge
             -- without a read request the data is poison, so a missing padding mask shows up
-            if s_x_rd /= '1' then
-                s_x_data <= to_signed(85, ACT_W);
-            elsif to_integer(s_x_addr) - C_IN_BASE < v_n_x and to_integer(s_x_addr) >= C_IN_BASE then
-                s_x_data <= v_x_mem(to_integer(s_x_addr) - C_IN_BASE);
-            else
-                report "input read outside the array, address " & integer'image(to_integer(s_x_addr)) severity failure;
-            end if;
-            if to_integer(s_w_addr) - C_W_BASE < v_n_w and to_integer(s_w_addr) >= C_W_BASE then
-                s_w_data <= v_w_mem(to_integer(s_w_addr) - C_W_BASE);
-            end if;
-            if to_integer(s_b_addr) - C_B_BASE < 4 * v_n_b and to_integer(s_b_addr) >= C_B_BASE then
-                s_b_data <= v_b_mem((to_integer(s_b_addr) - C_B_BASE) / 4);
+            if s_ce = '1' then
+                if s_x_rd /= '1' then
+                    s_x_data <= to_signed(85, ACT_W);
+                elsif to_integer(s_x_addr) - C_IN_BASE < v_n_x and to_integer(s_x_addr) >= C_IN_BASE then
+                    s_x_data <= v_x_mem(to_integer(s_x_addr) - C_IN_BASE);
+                else
+                    report "input read outside the array, address " & integer'image(to_integer(s_x_addr)) severity failure;
+                end if;
+                if to_integer(s_w_addr) - C_W_BASE < v_n_w and to_integer(s_w_addr) >= C_W_BASE then
+                    s_w_data <= v_w_mem(to_integer(s_w_addr) - C_W_BASE);
+                end if;
+                if to_integer(s_b_addr) - C_B_BASE < 4 * v_n_b and to_integer(s_b_addr) >= C_B_BASE then
+                    s_b_data <= v_b_mem((to_integer(s_b_addr) - C_B_BASE) / 4);
+                end if;
             end if;
             -- writes
             if s_out_we = '1' then
@@ -197,11 +233,14 @@ begin
         end loop;
         report G_LAYER & " " & G_FRAME & ": " & integer'image(v_writes) & " results written, "
                & integer'image(v_n_exp) & " expected, " & integer'image(v_errors) & " errors, "
-               & integer'image(to_integer(s_cycles)) & " cycles for " & integer'image(C_TERMS) & " MACs";
+               & integer'image(v_ce_cycles) & " enabled cycles, " & integer'image(to_integer(s_cycles)) & " total cycles for "
+               & integer'image(C_TERMS) & " MACs";
         if v_errors > 0 or v_writes /= v_n_exp then
             report "FAIL" severity failure;
-        elsif to_integer(s_cycles) < C_TERMS or to_integer(s_cycles) > C_TERMS + 8 then
-            report "FAIL, cycle count out of range" severity failure;
+        elsif v_ce_cycles < C_TERMS or v_ce_cycles > C_TERMS + 8 then
+            report "FAIL, enabled cycle count out of range" severity failure;
+        elsif to_integer(s_cycles) < v_ce_cycles or (G_STALL = 0 and to_integer(s_cycles) /= v_ce_cycles) then
+            report "FAIL, o_cycles does not match the clocks while busy" severity failure;
         else
             report "PASS";
         end if;
@@ -232,7 +271,7 @@ begin
         s_start <= '1';
         wait until rising_edge(s_clk);
         s_start <= '0';
-        wait for (C_TERMS + 1000) * C_PERIOD;
+        wait for (C_TERMS + 1000) * (1 + 4 * G_MAX_STALL) * C_PERIOD;
         if not s_finished then
             report "timeout, the core did not finish" severity failure;
         end if;

@@ -419,7 +419,6 @@ end entity;
 
 ```vhdl
 entity requant is
-  generic ( PIPE : natural := 2 );
   port (
     i_clk, i_rst : in std_logic;
     i_valid     : in std_logic;
@@ -434,6 +433,8 @@ end entity;
 ```
 
 Bit-exact to `requant()` in `quantize.py` (tested against the golden int32 and int8 vectors). One multiplier infers one DSP48E2 with the rounding constant on the C port.
+
+Implemented in `requant.vhd`, tested by `vhdl/tests/unit/compute-engine/tb_requant.vhd`. The latency is fixed at 2 clocks: a product register, then an output register with the rounding add, shift and clip in between (no `PIPE` generic; add a stage if synthesis shows the shift and clip does not close at 200 MHz). The product is 48 bit (32 bit acc times 16 bit unsigned m0), the shift is arithmetic, `i_shift` must be at least 1 (`multiplier()` guarantees it) and `m0 / 2^shift` must be below 1 so the result fits 32 bit. `i_rst` clears only the valid flags. The testbench checks the hand computed cases (ties, clipping, extremes), a random sweep against a floor-division reference, a reset in flight, and every conv layer plus `b1skip` of both golden frames. **Open:** the input is the full 32 bit `acc_t`, which does not fit one 27x18 DSP; synthesis will use several DSPs unless the input is limited to 27 bits (open point 7 of the spec, observed |acc| < 2^17).
 
 ### `skip_reader` (1.5, 4.6)
 

@@ -1,3 +1,4 @@
+-- Author: Roman Riazanov
 -- v1 convolution core: one MAC per clock, plain synchronous memory ports
 -- computes acc = bias + sum(x * w) per output element and writes it as int32
 -- conv_engine_v1 later wraps this core with the AXI master

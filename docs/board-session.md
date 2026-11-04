@@ -77,6 +77,18 @@ Expect `accuracy 0.9550`, `bit-exact vs test_logits.bin: yes` and `exit code 0` 
 - **Ctrl+C does not work** in the bare shell (no controlling terminal). Try `exec setsid cttyhack sh` right after boot, or start long runs with `&` and stop them with `killall camus_naive_O0 camus_naive_O2`.
 - **First quick check** (prebuilt `armhf/`, `-O2`, first 10 frames, not pinned, fixed clock): bit-exact, latency mean 1375 ms, min 1367, max 1381. Not a final number; the full runs over 200 frames are still to do.
 
+## 2b. Connecting from Ubuntu (session 2026-11-04)
+
+Steps are in `docs/connect-to-board.md`. Same board and SD card as 2a.
+
+- **Serial:** the USB-UART bridge appears as `/dev/ttyACM*` (`cdc_acm`, 04b4:0008). A power cycle disconnects it for about 4 s and can change the number; *Reset* does not disconnect it. The `error -71` messages and port changes in this session came with moving the cable by hand, so no USB port is known to be faulty.
+- **Clock:** `date; sleep 4; date` went from 00:01:26 to 00:01:30, so timers are fine. The board date starts at 1970, so the date in `board_run.sh` logs and in their file names is wrong; write the real date in the sheet.
+- **Ethernet profile:** `ifconfig eth0 ... up` on the board takes the link down, and NetworkManager then drops `zedboard` and retries DHCP on `Wired connection 1`. Bring the profile up after `ifconfig`.
+- **Ethernet speed, cause not confirmed:** with `zedboard` up at 1 Gb/s, a laptop ping (13:01) got no ARP reply and a `wget` hung. After `Link is Up - 100Mbps/Full (downshifted)` (13:22), ping and `wget` worked. The laptop still advertised 1000baseT afterwards. It is not known whether a cable change played a part, and limiting the link with `ethtool` has not been tested.
+- **Package:** the Docker image on this laptop had no cross gcc and had to be rebuilt. `board.tar.gz` is 2111 KB, and the md5 of `test_logits.bin` and `layers.txt` on the board match the laptop.
+- **Quick check on the rebuilt binaries** (prebuilt `armhf/`, `-O2`, first 10 frames, not pinned, fixed clock): bit-exact, exit code 0, latency mean 1376.115 ms, min 1368.278, max 1382.139, wall time 13.8 s. This matches 2a. Accuracy was 1.0000, but that covers only these 10 frames. Not a final number; the full runs over 200 frames are still to do.
+- **Console output can stop during a run, cause not confirmed.** In that quick check the console stopped after the `==` line and showed no prompt for about 15 minutes, until Enter was pressed. The results never appeared on the console, but they were complete in `results_*.log`, and `uptime` showed the board had kept running normally. Read results from the `results_*.log` file, not from the console. Start long runs with `sh board_run.sh armhf 1 > /dev/null 2>&1 &`, which still writes the file. That form has not been tested yet.
+
 ## 3. Results sheet
 
 Copy this block once per run. Lines marked (log) are in the `board_run.sh` log; only copy the summary here.

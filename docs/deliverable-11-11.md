@@ -4,7 +4,7 @@ Status: draft, written 2026-10-28. Everything marked **proposal** or **TBD** is 
 
 ## 1. Deliverable
 
-A baseline with measurements, due 2026-11-11. This plan reads it as the **software baseline: the naive plain-C int8 inference on one ARM A53 core of the Ultra96**, with latency, energy per frame and accuracy, and the measurement method written down (the plan's "benchmark against a naive implementation"). **Decided:** speed (latency) is the main focus; energy per frame is measured and reported but is not a goal (D7 in `docs/plans/vhdl-accelerator-tasks.md`). The hardware baseline (v1, 1 MAC, no buffering) is a stretch goal. **To confirm with the course requirements:** whether the deliverable means the software baseline, the v1 hardware, or both.
+A baseline with measurements, due 2026-11-11. This plan reads it as the **software baseline: the naive plain-C int8 inference on one ARM Cortex-A9 core of the ZedBoard (Zynq-7000)**; the board changed from the Ultra96 on 2026-11-04, with latency, energy per frame and accuracy, and the measurement method written down (the plan's "benchmark against a naive implementation"). **Decided:** speed (latency) is the main focus; energy per frame is measured and reported but is not a goal (D7 in `docs/plans/vhdl-accelerator-tasks.md`). The hardware baseline (v1, 1 MAC, no buffering) is a stretch goal. **To confirm with the course requirements:** whether the deliverable means the software baseline, the v1 hardware, or both.
 
 ## 2. Scope
 
@@ -39,7 +39,7 @@ Board access starts Fri 10-30, and nothing here needs the board.
 
 | # | Task | Output | Status |
 |---|---|---|---|
-| P1 | Cross-compile `camus_naive` for aarch64 as static binaries (`-O0` and `-O2`) in Docker, as a fallback if the board has no gcc or no internet. | `camus_naive_O0` and `_O2` for aarch64 | done: `make cross` in the `radl-tf1` image (cross gcc 7.5), binaries in `c/aarch64/`; bit-exact under arm64 emulation |
+| P1 | Cross-compile `camus_naive` for ARMv7 (Cortex-A9) as static binaries (`-O0` and `-O2`) in Docker, as a fallback if the board has no gcc or no internet. | `camus_naive_O0` and `_O2` for ARMv7 | done: `make cross` in the `radl-tf1` image (cross gcc 7.5, armhf), binaries in `c/armhf/` (`armv7-a`, hard float, `vfpv3-d16`, so no NEON); redone for the ZedBoard (was aarch64); bit-exact under ARMv7 emulation |
 | P2 | Prepare one transfer package: `c/` sources, the prepared binaries, `build/export/` (3.9 MB), on a USB stick or ready to `scp`. | package ready | done: `make package` writes `build/board.tar.gz` (2.3 MB); copying to a USB stick is left |
 | P3 | Write the first-session checklist: connect (serial/SSH/Jupyter), `uname -a`, `gcc --version`, `nproc`, CPU frequency and governor, build, run, copy results back. | checklist | done: `docs/board-session.md` section 2; `c/board_run.sh` records the conditions and runs both binaries |
 | P4 | Draft the measurement notes (section 5) and a results sheet to fill in during the session, including a place for the exact commands run. | sheet ready | done: `docs/board-session.md` sections 3 and 5 |
@@ -50,9 +50,9 @@ Board access starts Fri 10-30, and nothing here needs the board.
 | # | Task | Needs | Output |
 |---|---|---|---|
 | M1 | Get a shell on the board (serial, SSH or Jupyter terminal); note the OS image and kernel | D4 | working connection, OS noted |
-| M2 | Copy `c/` and `build/export/` to the board; build with `make` (or cross-compile statically for aarch64 in Docker if the board has no gcc) | M1 | `camus_naive_O0`, `camus_naive_O2` on the board |
+| M2 | Copy `c/` and `build/export/` to the board; build with `make` (or use the static ARMv7 binaries from P1 if the board has no gcc) | M1 | `camus_naive_O0`, `camus_naive_O2` on the board |
 | M3 | First run: check accuracy 95.5 % and `bit-exact: yes`; record mean/min/max latency | M2 | first numbers |
-| M4 | Set up the measurement conditions: pin to one A53 core, fix the CPU frequency governor, note gcc version and flags, decide on `-fno-tree-vectorize` (see below) | M3 | recorded conditions |
+| M4 | Set up the measurement conditions: pin to one Cortex-A9 core, fix the CPU frequency governor if there is one, note gcc version and flags, decide on `-fno-tree-vectorize` (see below) | M3 | recorded conditions |
 | M5 | Power measurement: DC meter in the board supply line, idle reading, loaded reading during a long run (`reps` argument) | M4, meter | power readings |
 | M6 | Compute energy per frame and fill the table; repeat runs to check spread | M5 | results table |
 | M7 | Write the method section: setup, commands, formulas, what was recorded | M6 | text for the report and slides |
@@ -84,16 +84,18 @@ Board access starts Fri 10-30, and nothing here needs the board.
 
 with `t_frame = wall time / frames` for a sequential run. Use `./camus_naive_O2 ../build/export <reps>` with `reps` chosen so the run lasts long enough for the meter to settle (proposal: at least about 60 s), read the steady-state average, and take the idle reading with the same services running and no inference.
 
-**Compiler flags:** gcc 12 and later auto-vectorize at `-O2` (from memory), so an A53 may use NEON even in this code. Decide whether the baseline must be strictly scalar; if yes, add `-fno-tree-vectorize` and say so in the write-up.
+**Compiler flags:** gcc 12 and later auto-vectorize at `-O2` (from memory). The Cortex-A9 has NEON, but gcc only uses it with `-mfpu=neon`, so it depends on the board gcc's defaults (check in `docs/board-session.md` section 5). Decide whether the baseline must be strictly scalar; if yes, add `-fno-tree-vectorize` and say so in the write-up.
 
 | | `-O0` | `-O2` |
 |---|---|---|
-| Test accuracy (int8) | | |
-| Bit-exact vs `test_logits.bin` | | |
-| Latency mean / min / max (ms) | | |
-| Frames over 33 ms | | |
+| Test accuracy (int8) | 95.5 % | 95.5 % |
+| Bit-exact vs `test_logits.bin` | yes (0 of 200 differ) | yes (0 of 200 differ) |
+| Latency mean / min / max (ms) | 5672.7 / 5668.9 / 5676.7 | 1375.9 / 1362.5 / 1391.6 |
+| Frames over 33 ms | 200 of 200 | 200 of 200 |
 | P_idle / P_loaded (W) | | |
 | E_total / E_dynamic per frame (mJ) | | |
+
+Both columns: run 1 on 2026-11-04 (`-O0` wall time 1134.5 s, `-O2` 275.2 s), ZedBoard (2 x Cortex-A9, fixed clock, about 667 MHz inferred from the 333 MHz global timer), Linux 4.0.0-xilinx-dev booted with `init=/bin/sh` (no other processes), prebuilt static `armhf/camus_naive_O0` and `_O2` (cross gcc 7.5, no NEON), not pinned (no `taskset`), 200 frames. Repeat runs still to do.
 
 ## 6. Risks
 
@@ -108,7 +110,7 @@ with `t_frame = wall time / frames` for a sequential run. Use `./camus_naive_O2 
 ## 7. Open questions
 
 1. Does the deadline mean the software baseline, the v1 hardware, or both?
-2. Which OS image is on the Ultra96, and is a shell reachable (D4)?
+2. Which OS image is on the ZedBoard, and is a shell reachable (D4)?
 3. Is a DC power meter available, and who operates it?
 4. Who does which task? The presentation lists system integration and benchmarking for two names, but the plan has three areas and the slide still has a TODO (D1).
 5. Strict scalar baseline or compiler default (see section 5)?

@@ -112,18 +112,19 @@ Weights are int8 `[K][C][FY][FX]` row-major, biases int32 `[K]`, for each layer 
 cd c
 make run              # builds and runs camus_naive_O0 and camus_naive_O2 on ../build/export
 ./camus_naive_O2 ../build/export 50   # 50 passes over the test set, e.g. for a long power measurement
+./camus_naive_O2 ../build/export 1 10 # first 10 test frames only, quick check
 ```
 
-Needs gcc and make; on the Ultra96 the same commands build a native aarch64 binary. Run `python/export.py` first (it writes `layers.txt`). On the Windows dev machine there is no C compiler, so it was built and run inside the `radl-tf1` Docker image:
+Needs gcc and make; on the board (ZedBoard, Cortex-A9) the same commands build a native ARMv7 binary. Run `python/export.py` first (it writes `layers.txt`). On the Windows dev machine there is no C compiler, so it was built and run inside the `radl-tf1` Docker image:
 
 ```powershell
 docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make run
-docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make package   # static aarch64 binaries in c/aarch64/ + build/board.tar.gz for the board
+docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make package   # static ARMv7 binaries in c/armhf/ + build/board.tar.gz for the board
 ```
 
 On the board, `c/board_run.sh` records the conditions and runs both binaries pinned to one core; see `docs/board-session.md`.
 
-Host results (x86 under Docker, not the A53, so only useful as a correctness check): bit-exact on all 200 frames, 95.5 % accuracy, 278 ms/frame at `-O0` and 65 ms/frame at `-O2`. The numbers that count come from running it on the board.
+Host results (x86 under Docker, not the board, so only useful as a correctness check): bit-exact on all 200 frames, 95.5 % accuracy, 278 ms/frame at `-O0` and 65 ms/frame at `-O2`. The numbers that count come from running it on the board.
 
 ## Open points
 

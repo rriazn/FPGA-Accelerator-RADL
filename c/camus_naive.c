@@ -3,7 +3,8 @@
  * Weights, layer table and test set are read at runtime from the Python export directory.
  * Bit-exact to python/quantize.py; the run fails if any logit differs from test_logits.bin.
  *
- *   camus_naive <export_dir> [reps]     reps = passes over the test set (default 1; use more for power runs)
+ *   camus_naive <export_dir> [reps] [frames]     reps = passes over the test set (default 1; use more for power runs)
+ *                                                frames = use only the first N test frames (default all; for quick checks)
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -183,6 +184,8 @@ int main(int argc, char **argv) {
     const char *dir = argv[1];
     int reps = argc > 2 ? atoi(argv[2]) : 1;
     if (reps < 1) die("bad reps:", argv[2]);
+    int frames = argc > 3 ? atoi(argv[3]) : 0;
+    if (argc > 3 && frames < 1) die("bad frames:", argv[3]);
 
     layer_t L[MAX_LAYERS] = {0};
     int nl = load_layers(dir, L);
@@ -208,6 +211,7 @@ int main(int argc, char **argv) {
     int32_t *tl = read_file(dir, "test_logits.bin", &sl); /* little-endian int32; the board and host are LE */
     size_t N = sy;
     if (sx != N * IN_H * IN_W || sl != N * N_CLASSES * sizeof(int32_t)) die("inconsistent test files in", dir);
+    if (frames > 0 && (size_t)frames < N) N = frames;
 
     static work_t work;
     size_t correct = 0, mismatches = 0, over = 0;

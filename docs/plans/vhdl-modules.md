@@ -20,13 +20,13 @@ Companion to `architecture-spec.md` (behavior, layout, registers), `architecture
 | Module | File | Used in | Task | Owner area |
 |---|---|---|---|---|
 | `camus_pkg` | `camus_pkg.vhd` | all | 0.3 | Core, Sys |
-| `axi_lite_regs` | `regs.vhd` | v1, target | 1.4 | Sys |
+| `axi_lite_regs` | `../interface/axi_lite_regs.vhd` | v1, target | 1.4 | Sys |
 | `loop_nest` | `loop_nest.vhd` | v1 | 1.3 | Core |
 | `addr_gen` | `addrgen.vhd` | v1, target | 1.3 | Core |
 | `axi_master_rd` | `axi_master_rd.vhd` | v1, target | 2.3 | Core, Sys |
 | `axi_master_wr` | `axi_master_wr.vhd` | v1, target | 2.3 | Core, Sys |
 | `mac_int8` | `mac_int8.vhd` | v1 | 1.1 | Core |
-| `conv_engine_v1` | `conv_v1.vhd` | v1 | 2.1 | Core |
+| `conv_engine_v1` | `conv_engine_v1.vhd` | v1 | 2.1 | Core |
 | `conv_accel_top` | `top.vhd` | v1, target | 2.3 | Core, Sys |
 | `weight_store` | `weight_store.vhd` | target | 4.1 | Core |
 | `weight_loader` | `weight_loader.vhd` | target | 4.1 | Core |
@@ -97,7 +97,7 @@ entity axi_lite_regs is
 end entity;
 ```
 
-Writing `start` while `busy` sets `error`. `done` is cleared on `start`. Optional `o_irq` output (open point 4 in the spec).
+Writing `start` while `busy` sets `error` and is not forwarded. `done` is cleared on `start`. Layer registers are locked while `i_busy` is 1. Register map in `axi-interfaces.md` section 6. Implemented as `vhdl/src/interface/axi_lite_regs.vhd` (generic `G_ADDR_W`, default 8) with the testbench `vhdl/tests/unit/interface/tb_axi_lite_regs.vhd`. No `o_irq` in this version, polling only.
 
 ### `conv_accel_top` (task 2.3)
 
@@ -223,29 +223,43 @@ Latency is one clock: `o_acc` and `o_acc_valid` change on the edge that consumes
 
 ### `conv_core_v1` (task 2.1, first part)
 
-The engine core with plain synchronous memory ports instead of AXI: `loop_nest`, `addr_gen` and `mac_int8` wired together (`conv_core_v1.vhd`). The memories sample the addresses at a clock edge and return the data in the next cycle. The flags of each term (`first`, `last`, padding, last output, output address) travel through the same pipeline stages as its data, so they reach the MAC together with it. The result appears two cycles after the last term (cycles = MACs + 2) and is written as int32 together with its address. `o_x_rd` is 0 for padding positions, where the input must not be read and the MAC gets 0; the testbench memory returns poison data in that case. **Stalling (proposal, to be agreed with the system owner):** `i_ce` is a clock enable for the whole core. With `i_ce = 0` nothing moves (loop counters, pipeline stages and MAC all hold), so the wrapper can wait for slow memory. The read ports behave like a BRAM with an enable: with `i_ce = 1` the address is sampled and the data appears in the next cycle; with `i_ce = 0` the data inputs must keep the value of the last enabled cycle. For a slow memory the wrapper fetches the data for the addresses on the ports (they are stable while `i_ce = 0`), latches it, then raises `i_ce` for one cycle. `o_term_valid` says the addresses belong to a real term; it is 0 while idle and during the two flush cycles after the last term, where the wrapper can keep `i_ce = 1`. `o_out_we` is a one-cycle strobe that cannot be stalled, at most one per enabled cycle, so the write side needs a small FIFO and drops `i_ce` before it is full. `o_cycles` counts all clocks while busy, stalled ones included. The testbench stalls randomly (`G_STALL`, `G_MAX_STALL`) and the results stay bit-exact.
+The engine core with plain synchronous memory ports instead of AXI: `loop_nest`, `addr_gen` and `mac_int8` wired together (`conv_core_v1.vhd`). The memories sample the addresses at a clock edge and return the data in the next cycle. The flags of each term (`first`, `last`, padding, last output, output address) travel through the same pipeline stages as its data, so they reach the MAC together with it. The result appears two cycles after the last term (cycles = MACs + 2) and is written as int32 together with its address. `o_x_rd` is 0 for padding positions, where the input must not be read and the MAC gets 0; the testbench memory returns poison data in that case. `o_b_rd` is 1 only on the first term of an output element, the one term where the MAC uses the bias, so the wrapper reads the bias once per output element (the testbench returns poison otherwise). **Stalling (proposal, to be agreed with the system owner):** `i_ce` is a clock enable for the whole core. With `i_ce = 0` nothing moves (loop counters, pipeline stages and MAC all hold), so the wrapper can wait for slow memory. The read ports behave like a BRAM with an enable: with `i_ce = 1` the address is sampled and the data appears in the next cycle; with `i_ce = 0` the data inputs must keep the value of the last enabled cycle. For a slow memory the wrapper fetches the data for the addresses on the ports (they are stable while `i_ce = 0`), latches it, then raises `i_ce` for one cycle. `o_term_valid` says the addresses belong to a real term; it is 0 while idle and during the two flush cycles after the last term, where the wrapper can keep `i_ce = 1`. `o_out_we` is a one-cycle strobe that cannot be stalled, at most one per enabled cycle, so the write side needs a small FIFO and drops `i_ce` before it is full. `o_cycles` counts all clocks while busy, stalled ones included. The testbench stalls randomly (`G_STALL`, `G_MAX_STALL`) and the results stay bit-exact.
 
 `conv_engine_v1` below wraps this core with the AXI master. The integration test is `vhdl/tests/integration/tb_conv_core_v1.vhd`, which runs a layer from the golden vectors and compares every accumulator.
 
 ### `conv_engine_v1` (task 2.1)
 
-Sequences one MAC at a time over the whole layer. For each iteration it reads `x` and `w` (skipping the read and using 0 when `o_x_valid = 0`, still with `i_en = 1` so that `i_first` loads the bias), feeds `mac_int8`, and at the end of each output element writes the int32 result.
+Adapter between `conv_core_v1` (BRAM-like ports, `i_ce` stall) and the command interface of `axi_master_rd` and `axi_master_wr`. File `conv_engine_v1.vhd`, testbench `vhdl/tests/integration/tb_conv_engine_v1.vhd`.
 
 ```vhdl
 entity conv_engine_v1 is
+  generic ( G_FIFO_DEPTH : natural := 8 );              -- result fifo, at least 4
   port (
     i_clk, i_rst : in std_logic;
     i_cfg       : in layer_cfg_t;
     i_start     : in std_logic;
-    o_busy, o_done, o_error : out std_logic;
-    o_cycles    : out unsigned(31 downto 0);         -- counts clk while busy
-    -- read command and response ports of axi_master_rd (x, w, bias)
-    -- write command and data ports of axi_master_wr (acc)
+    o_busy, o_done, o_error : out std_logic;           -- done and error are one clock pulses, error together with done
+    o_cycles    : out unsigned(31 downto 0);           -- start to done, write drain included
+    -- axi_master_rd: o_rd_cmd_valid/addr/len, i_rd_cmd_ready, i_rd_rsp_valid/data/last/error, o_rd_rsp_ready
+    -- axi_master_wr: o_wr_cmd_valid/addr/len, i_wr_cmd_ready, o_wr_data_valid/data/strb/last, i_wr_data_ready, i_wr_done, i_wr_error
   );
 end entity;
 ```
 
-Details: selects the byte inside the wide AXI beat from the low address bits; reads the bias once per output element (v1 does not cache it); writes with `wstrb` set to the 4 bytes of the int32 inside the wide beat. Instantiates `loop_nest`, `addr_gen` and `mac_int8`.
+**Read side.** A state machine per MAC term: it latches the addresses on the core ports, then reads `x` (not at padding positions), `w` and the bias (only when `o_b_rd`), one command at a time, and waits for each response. It picks the byte (or the 32 bit word) out of the beat with the low address bits, latches the three values, and gives the core one `i_ce` pulse; at that edge the latched values move to the core's data inputs. While the core has no term (idle, flush) `i_ce` stays 1.
+
+**Write side.** The core's result strobes go into a fifo of address and data. A second state machine takes one entry at a time: command and data are presented together (each drops when accepted), then it waits for `i_wr_done`. The int32 is placed in its lane of the beat, `wstrb` marks those 4 bytes, `len` is 0 and `wlast` is 1. `i_ce` is held back while the fifo has fewer than 3 free places (one strobe is visible, one more can follow from the current `i_ce`).
+
+**Done and error.** `o_done` comes after the core is done, the fifo is empty and the last write response has arrived, so the ARM never reads stale DDR. A response with an error sets a flag that is reported as an `o_error` pulse together with `o_done`; v1 does not abort, the layer runs to the end. The flag is cleared at the next start. `o_busy` rises one clock after `i_start`, which is what `axi_lite_regs` assumes.
+
+**Assumptions about the masters (proposal, to agree with the master owner).**
+- One command at a time on each channel, responses in order (so there is no tag or ordering question).
+- `i_cmd_addr` is beat aligned; the engine aligns it itself, so a master that aligns again is fine.
+- `o_rd_rsp_ready` is 1 only while the engine waits for a response, a response is held until it is accepted.
+- `i_wr_error` is only looked at together with `i_wr_done`, and `i_rd_rsp_error` together with `i_rd_rsp_valid`.
+- Command and write data may be presented at the same time and accepted in any order.
+
+**Speed.** A MAC takes about 8 clocks with a master that answers in the cycle after the command, and about 12 with a few clocks of latency (all reads are sequential and there is one term at a time). That is the baseline, the later steps remove it with line buffers, bursts and the PE array.
 
 ---
 

@@ -4,6 +4,7 @@ use ieee.numeric_std.all;
 
 package camus_pkg is
     constant AXI_ADDR_W : natural := 32;   -- width of AXI addresses
+    constant AXI_DATA_W : natural := 128;  -- width of the AXI data port, one beat is one 16 channel pixel in int8 (depends on D4)
     -- Widths shared by all modules
     constant LANES      : natural := 16;     -- channels per block in the [C/16][H][W][16] layout, one output channel per PE lane
     constant ACT_W      : natural := 8;      -- activation and weight width, int8 with zero point 0

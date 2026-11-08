@@ -15,16 +15,17 @@ use work.camus_pkg.all;
 entity conv_core_v1 is
     port (
         i_clk, i_rst : in std_logic;
-        i_ce : in std_logic;                        -- clock enable, 0 stalls the core
+        i_ce : in std_logic; -- clock enable, 0 stalls the core
         i_cfg : in layer_cfg_t;
         i_start : in std_logic;
         o_busy : out std_logic;
-        o_done : out std_logic;                     -- one cycle, after the last result is written
-        o_cycles : out unsigned(31 downto 0);       -- clocks from start until done, stalled clocks included
+        o_done : out std_logic; -- one cycle, after the last result is written
+        o_cycles : out unsigned(31 downto 0); -- clocks from start until done, stalled clocks included
         -- synchronous read ports, the data is valid in the cycle after the address (see i_ce)
-        o_term_valid : out std_logic;               -- the addresses belong to a real term, 0 while idle or flushing
+        o_term_valid : out std_logic; -- the addresses belong to a real term, 0 while idle or flushing
         o_x_addr, o_w_addr, o_b_addr : out unsigned(AXI_ADDR_W-1 downto 0);
-        o_x_rd : out std_logic;                     -- 0 for padding positions, the input is not read there
+        o_x_rd : out std_logic; -- 0 for padding positions, the input is not read there
+        o_b_rd : out std_logic; -- 1 on the first term of an output element, the bias is only used there
         i_x_data, i_w_data : in act_t;
         i_b_data : in acc_t;
         -- write port for the int32 results
@@ -75,12 +76,15 @@ begin
     o_x_addr <= s_x_addr;
     o_x_rd <= s_x_valid and s_running;
     o_term_valid <= s_running;
+    o_b_rd <= s_first and s_running;
     o_w_addr <= s_w_addr;
     o_b_addr <= s_b_addr;
 
+    
     process(i_clk)
     begin
         if rising_edge(i_clk) then
+            -- stage 0 -> 1
             if i_ce = '1' then
                 s_en_d1 <= s_running;
                 s_first_d1 <= s_first;

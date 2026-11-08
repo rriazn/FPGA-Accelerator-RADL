@@ -68,7 +68,7 @@ architecture sim of tb_conv_core_v1 is
     signal s_x_addr, s_w_addr, s_b_addr, s_out_addr : unsigned(AXI_ADDR_W-1 downto 0);
     signal s_x_data, s_w_data : act_t := (others => '0');
     signal s_b_data, s_out_data : acc_t := (others => '0');
-    signal s_out_we, s_x_rd, s_term_valid : std_logic;
+    signal s_out_we, s_x_rd, s_b_rd, s_term_valid : std_logic;
     signal s_loaded, s_finished : boolean := false;
 begin
 
@@ -87,7 +87,7 @@ begin
         port map (
             i_clk => s_clk, i_rst => s_rst, i_ce => s_ce, i_cfg => s_cfg, i_start => s_start,
             o_busy => s_busy, o_done => s_core_done, o_cycles => s_cycles,
-            o_term_valid => s_term_valid, o_x_addr => s_x_addr, o_x_rd => s_x_rd, o_w_addr => s_w_addr, o_b_addr => s_b_addr,
+            o_term_valid => s_term_valid, o_x_addr => s_x_addr, o_x_rd => s_x_rd, o_b_rd => s_b_rd, o_w_addr => s_w_addr, o_b_addr => s_b_addr,
             i_x_data => s_x_data, i_w_data => s_w_data, i_b_data => s_b_data,
             o_out_we => s_out_we, o_out_addr => s_out_addr, o_out_data => s_out_data
         );
@@ -195,7 +195,10 @@ begin
                 if to_integer(s_w_addr) - C_W_BASE < v_n_w and to_integer(s_w_addr) >= C_W_BASE then
                     s_w_data <= v_w_mem(to_integer(s_w_addr) - C_W_BASE);
                 end if;
-                if to_integer(s_b_addr) - C_B_BASE < 4 * v_n_b and to_integer(s_b_addr) >= C_B_BASE then
+                -- the bias is only requested on the first term of an output element, otherwise it is poison
+                if s_b_rd /= '1' then
+                    s_b_data <= to_signed(1515870810, ACC_W);
+                elsif to_integer(s_b_addr) - C_B_BASE < 4 * v_n_b and to_integer(s_b_addr) >= C_B_BASE then
                     s_b_data <= v_b_mem((to_integer(s_b_addr) - C_B_BASE) / 4);
                 end if;
             end if;

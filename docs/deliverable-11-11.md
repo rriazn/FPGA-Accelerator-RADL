@@ -64,7 +64,7 @@ Board access starts Fri 10-30, and nothing here needs the board.
 | L1 | Freeze the register map, port widths, module names | 0.3 | decisions in `vhdl-modules.md` |
 | L2 | Per-layer golden vectors in the chosen layout (input, int32 accumulator, requantized output); random-layer vectors are deferred until 0.3 settles the ranges, still open in task 0.5. **Network vectors done** (`build/export/golden/`) | 0.5 | L1 (Pipe side) |
 | L3 | `mac_int8`, `loop_nest`, `addr_gen` plus testbenches | 1.1, 1.3 | L1, L2 |
-| L4 | `axi_master_rd` / `axi_master_wr` and a simulation memory model | 2.3 | L1 |
+| L4 | `axi_master_rd` / `axi_master_wr` and a simulation memory model. **Done 2026-11-09** (in simulation): masters, `axi_ddr_master` wrapper, `axi_mem_model`; regression 73/73 on both boards, golden b3sc bit-exact through real AXI ([axi-ddr-master.md](plans/axi-ddr-master.md)) | 2.3 | L1 |
 | L5 | `conv_engine_v1` and a layer-level testbench on the stem and `b1c1`, then all layers | 2.1, 2.2 | L3, L4 |
 | L6 | Extract cycle counts per layer from simulation | | L5 |
 

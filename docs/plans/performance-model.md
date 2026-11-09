@@ -24,7 +24,7 @@ python tools/perf_model.py --sweep-latency       # v1 over several DDR read late
 | Deadline | 33 ms | project requirement |
 | DSP48E2 / BRAM36 / UltraRAM | 360 / 216 / 0 | from secondary sources (see below), check against the AMD datasheet |
 | BRAM36 data bits, widest port | 36,864 (with parity) / 72 | AMD architecture, check against the datasheet |
-| AXI width, efficiency | 128 bit, 100 % of peak | **placeholder**, from the block design |
+| AXI width, efficiency | 128 bit on the Ultra96 (64 bit on the ZedBoard: `--axi-bits 64`), 100 % of peak | **placeholder**, from the block design |
 | v1 read latency, reads in flight | 30 clocks, 1 | **placeholder**, from the block design and the wrapper |
 | Weights per frame | loaded every frame | conservative, open point 2 of the spec |
 

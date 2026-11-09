@@ -3,8 +3,17 @@ library ieee;
 use ieee.numeric_std.all;
 
 package camus_pkg is
+    -- Author: Olimjon Mirzayusupov (platform switch: board_t, BOARD and AXI_DATA_W derived from the board)
+    -- BOARD is the only board-specific line in the RTL, see docs/plans/axi-ddr-master.md section 3.2
+    -- ZEDBOARD: 64-bit HP port, a 16 channel int8 pixel is 2 beats; ULTRA96: 128-bit HP port, a pixel is 1 beat
+    -- BOARD stays ULTRA96 (the old fixed 128) until the switch of the default to ZEDBOARD is agreed
+    type board_t is (ZEDBOARD, ULTRA96);
+    constant BOARD : board_t := ULTRA96;
+    type board_nat_t is array (board_t) of natural;
+    constant AXI_DATA_W_BY_BOARD : board_nat_t := (ZEDBOARD => 64, ULTRA96 => 128);
+
     constant AXI_ADDR_W : natural := 32;   -- width of AXI addresses
-    constant AXI_DATA_W : natural := 128;  -- width of the AXI data port, one beat is one 16 channel pixel in int8 (depends on D4)
+    constant AXI_DATA_W : natural := AXI_DATA_W_BY_BOARD(BOARD);  -- width of the AXI data port (HP port), set by BOARD
     -- Widths shared by all modules
     constant LANES      : natural := 16;     -- channels per block in the [C/16][H][W][16] layout, one output channel per PE lane
     constant ACT_W      : natural := 8;      -- activation and weight width, int8 with zero point 0

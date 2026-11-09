@@ -34,7 +34,7 @@ Everything between the CPU and the accelerator is outside it.
 | F4 | `sync_fifo`: synchronous FIFO, first-word-fall-through, registered output, with a defined timing contract | `vhdl/src/interface/sync_fifo.vhd` |
 | F5 | `axi_master_rd`: several read streams, one ARID per stream, a burst splitter per stream, several bursts in flight | `vhdl/src/interface/axi_master_rd.vhd` |
 | F6 | `axi_master_wr`: a burst splitter, several bursts in flight, one `done` per command | `vhdl/src/interface/axi_master_wr.vhd` |
-| F7 | `axi_mem_model`: simulation-only AXI4 slave, with: <br>- random latency and back-pressure; <br>- out-of-order returns across IDs; <br>- switchable error injection; <br>- protocol and burst-length checks; <br>- 4 regions of configurable size; <br>- backdoor preload and dump. | `vhdl/tests/models/axi_mem_model.vhd` |
+| F7 | `axi_mem_model`: simulation-only AXI4 slave, with: <br>- random latency and back-pressure; <br>- out-of-order returns across IDs; <br>- switchable error injection; <br>- protocol and burst-length checks; <br>- 4 regions of configurable size; <br>- backdoor preload and dump. | `vhdl/tests/models/axi_mem_model_pkg.vhd` (types), `axi_mem_model_shared.vhd` (memory, statistics, backdoor), `axi_mem_model.vhd` (entity) |
 | F8 | Unit TBs for F2–F7, plus one integration TB: `conv_engine_v1` → `axi_ddr_master` → `axi_mem_model`. The integration TB also covers F9, which is structural only. | `vhdl/tests/unit/interface/`, `vhdl/tests/integration/` |
 | F9 | `axi_ddr_master`: a structural wrapper that joins both masters into **one `m_axi` bundle** with one ID width. The top level ([task 2.3](vhdl-accelerator-tasks.md#L74)) instantiates this one block. | `vhdl/src/interface/axi_ddr_master.vhd` |
 

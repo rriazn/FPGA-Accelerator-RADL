@@ -23,7 +23,8 @@
 --   r5: ghdl -r --std=08 --workdir=<dir> tb_axi_master_rd -gG_N_RD=4 -gG_DATA_W=128 -gG_READY_PCT=70 -gG_RD_LAT_MAX=12 -gG_REORDER=true -gG_SEED=1
 -- run from vhdl/ (GHDL, VHDL-2008, the LLVM/GCC backend needs -e):
 --   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/axi_pkg.vhd src/interface/sync_fifo.vhd src/interface/axi_skid.vhd \
---        src/interface/axi_master_rd.vhd tests/models/axi_mem_model.vhd tests/unit/interface/tb_axi_master_rd.vhd
+--        src/interface/axi_master_rd.vhd tests/models/axi_mem_model_pkg.vhd tests/models/axi_mem_model_shared.vhd tests/models/axi_mem_model.vhd \
+--        tests/unit/interface/tb_axi_master_rd.vhd
 --   ghdl -e --std=08 --workdir=<dir> tb_axi_master_rd
 --   then one of the configurations above
 library ieee;

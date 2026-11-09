@@ -479,7 +479,7 @@ The width of `o_skip_data` depends on open point 6: if the requantized shortcut 
 
 ## Simulation only
 
-- **`axi_mem_model`**: AXI4 slave memory behind the AXI master port, preloaded from the exported files, with configurable latency and back-pressure, and a dump of its contents at the end. Implemented in `vhdl/tests/models/axi_mem_model.vhd`: the testbench preloads and reads back through the backdoor procedures `mem_write` and `mem_read`.
+- **`axi_mem_model`**: AXI4 slave memory behind the AXI master port, preloaded from the exported files, with configurable latency and back-pressure, and a dump of its contents at the end. Implemented in `vhdl/tests/models/`: `axi_mem_model_pkg.vhd` (types), `axi_mem_model_shared.vhd` (the memory and the statistics) and `axi_mem_model.vhd` (the entity); the testbench preloads and reads back through the backdoor procedures `mem_write` and `mem_read`.
 - **`golden_io`**: reads the golden vectors of task 0.5 with `std.textio` (activations, weights, bias, expected accumulators and outputs) and compares them against the design's results, reporting the first mismatch.
 - **Testbenches**: one per module above (`tb_<module>.vhd`), then a layer-level testbench driving the full top level through its AXI-Lite port (task 2.2).
 

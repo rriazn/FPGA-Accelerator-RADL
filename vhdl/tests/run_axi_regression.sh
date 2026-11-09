@@ -44,7 +44,7 @@ SRC="$PKG src/axi_pkg.vhd
      src/compute-engine/requant.vhd src/compute-engine/conv_core_v1.vhd src/compute-engine/conv_engine_v1.vhd
      src/interface/axi_lite_regs.vhd src/interface/sync_fifo.vhd src/interface/axi_skid.vhd
      src/interface/axi_master_rd.vhd src/interface/axi_master_wr.vhd src/interface/axi_ddr_master.vhd
-     tests/models/axi_mem_model.vhd
+     tests/models/axi_mem_model_pkg.vhd tests/models/axi_mem_model_shared.vhd tests/models/axi_mem_model.vhd
      tests/unit/tb_camus_pkg.vhd tests/unit/tb_axi_pkg.vhd
      tests/unit/compute-engine/tb_loop_nest.vhd tests/unit/compute-engine/tb_addr_gen.vhd
      tests/unit/compute-engine/tb_mac_int8.vhd tests/unit/compute-engine/tb_requant.vhd

@@ -1,5 +1,5 @@
 -- Author: Olimjon Mirzayusupov
--- self-test of axi_mem_model (tests/models/axi_mem_model.vhd), the reference that the AXI master testbenches rely on
+-- self-test of axi_mem_model (tests/models/axi_mem_model_pkg.vhd, axi_mem_model_shared.vhd, axi_mem_model.vhd), the reference that the AXI master testbenches rely on
 -- a directed AXI master (one channel action at a time, ready/valid driven at falling edges) checks:
 --   backdoor write/read and the x"A5" fill, a write burst then a read burst of the same data, byte strobes,
 --   W beats before their AW, out-of-order returns across IDs with order kept inside an ID, SLVERR only while
@@ -9,7 +9,7 @@
 --   burst type, size, length, 4 KB crossing, alignment, WLAST early and late, write outside the regions,
 --   AR payload change before the handshake, X on a valid
 -- run from vhdl/ (GHDL, VHDL-2008, the LLVM/GCC backend needs -e):
---   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/axi_pkg.vhd tests/models/axi_mem_model.vhd \
+--   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/axi_pkg.vhd tests/models/axi_mem_model_pkg.vhd tests/models/axi_mem_model_shared.vhd tests/models/axi_mem_model.vhd \
 --        tests/unit/interface/tb_axi_mem_model.vhd
 --   ghdl -e --std=08 --workdir=<dir> tb_axi_mem_model
 --   ghdl -r --std=08 --workdir=<dir> tb_axi_mem_model -gG_DATA_W=128 -gG_SEED=2

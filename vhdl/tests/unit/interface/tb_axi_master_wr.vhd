@@ -23,7 +23,7 @@
 -- command (w3), errors in the first / a middle / the final burst (w4)
 -- run from vhdl/ (GHDL, VHDL-2008, the LLVM/GCC backend needs -e):
 --   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/axi_pkg.vhd src/interface/sync_fifo.vhd \
---        src/interface/axi_skid.vhd src/interface/axi_master_wr.vhd tests/models/axi_mem_model.vhd \
+--        src/interface/axi_skid.vhd src/interface/axi_master_wr.vhd tests/models/axi_mem_model_pkg.vhd tests/models/axi_mem_model_shared.vhd tests/models/axi_mem_model.vhd \
 --        tests/unit/interface/tb_axi_master_wr.vhd
 --   ghdl -e --std=08 --workdir=<dir> tb_axi_master_wr
 --   ghdl -r --std=08 --workdir=<dir> tb_axi_master_wr -gG_CFG=1 -gG_SEED=1     (w1)

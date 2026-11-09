@@ -7,9 +7,9 @@ Companion to `architecture-spec.md` (behavior, layout, registers), `architecture
 - **Naming (decided):** every port starts with `i_` (input) or `o_` (output), for example `i_clk`, `o_acc`. Every signal inside an architecture starts with `s_`, for example `s_acc`. Record fields (`cfg.c`) are not prefixed.
 - `ieee.numeric_std` (`signed`/`unsigned`), no `std_logic_arith`. Synchronous logic, one clock `i_clk` (200 MHz, D5).
 - **Reset (decided):** one port `i_rst`, **synchronous** and **active-high** (reset while `i_rst = '1'`), used by every module. Control state (valid flags, FSM states, counters) must always be reset. Datapath registers need not be, because the next valid input overwrites them; `mac_int8` resets its accumulator anyway, which is harmless and maps to the synchronous reset of the DSP48E2. AXI resets are active-low (`aresetn`), so `conv_accel_top` inverts the AXI reset once before it reaches the internal modules.
-- **AXI bus ports (open):** the AXI4-Lite and AXI4 ports are written below as comments with their standard names (`s_axi_*`, `m_axi_*`). Vivado infers the interface from these names, so prefixing them with `i_`/`o_` may stop it from recognizing the bundle; settle this when the block design is made (task 3.3).
+- **AXI bus ports (decided 2026-11-09):** the AXI4-Lite and AXI4 ports keep their standard lowercase names (`s_axi_*`, `m_axi_*`) without `i_`/`o_` prefixes, so Vivado recognizes the bundles (as in `axi_lite_regs` and `axi_ddr_master`).
 - Between internal blocks: **valid/ready handshake** (a transfer happens in a cycle where `valid` and `ready` are both 1). Blocks that cannot stall (the PE pipeline) say so and use only `valid`.
-- Common generics, defined once in `camus_pkg.vhd`: `LANES = 16`, `ACT_W = 8`, `ACC_W = 32`, `AXI_DATA_W = 128`, `AXI_ADDR_W = 32`. Bus widths depend on the block design (D4); keep them as generics, not literals.
+- Common generics, defined once in `camus_pkg.vhd`: `LANES = 16`, `ACT_W = 8`, `ACC_W = 32`, `AXI_DATA_W` (64 on the ZedBoard, 128 on the Ultra96, derived from `BOARD`), `AXI_ADDR_W = 32`. Bus widths depend on the block design (D4); keep them as generics, not literals.
 - Addresses to the AXI master are **byte addresses**. Element addresses (from the layout formula in the spec) are converted to byte addresses in `addr_gen`.
 - Each module gets a testbench against the golden vectors (task 0.5) as noted per module.
 
@@ -23,8 +23,11 @@ Companion to `architecture-spec.md` (behavior, layout, registers), `architecture
 | `axi_lite_regs` | `../interface/axi_lite_regs.vhd` | v1, target | 1.4 | Sys |
 | `loop_nest` | `loop_nest.vhd` | v1 | 1.3 | Core |
 | `addr_gen` | `addrgen.vhd` | v1, target | 1.3 | Core |
-| `axi_master_rd` | `axi_master_rd.vhd` | v1, target | 2.3 | Core, Sys |
-| `axi_master_wr` | `axi_master_wr.vhd` | v1, target | 2.3 | Core, Sys |
+| `axi_master_rd` | `../interface/axi_master_rd.vhd` | v1, target | 2.3 | Core, Sys |
+| `axi_master_wr` | `../interface/axi_master_wr.vhd` | v1, target | 2.3 | Core, Sys |
+| `axi_ddr_master` (both masters, one `m_axi` bundle) | `../interface/axi_ddr_master.vhd` | v1, target | 2.3 | Sys |
+| `axi_skid`, `sync_fifo` (inside the masters) | `../interface/axi_skid.vhd`, `../interface/sync_fifo.vhd` | v1, target | 2.3 | Sys |
+| `axi_pkg` (AXI constants, per-board limits, burst split rule) | `../axi_pkg.vhd` | v1, target | 2.3 | Sys |
 | `mac_int8` | `mac_int8.vhd` | v1 | 1.1 | Core |
 | `conv_engine_v1` | `conv_engine_v1.vhd` | v1 | 2.1 | Core |
 | `conv_accel_top` | `top.vhd` | v1, target | 2.3 | Core, Sys |
@@ -161,12 +164,14 @@ Where `iy = oy*stride - pad + fy`, `ix = ox*stride - pad + fx`. Implemented as a
 
 Read and write channels of the AXI master, with a simple command interface so the engine does not deal with AXI details. v1 uses single-beat commands. Bursts (`len > 1`) are added with the line buffers in 4.1.
 
+**Implemented (2026-11-09)** in `vhdl/src/interface/` as `axi_master_rd`, `axi_master_wr` and the wrapper `axi_ddr_master`. The entities below are the original proposal; the implemented ones differ: several read streams with one ARID each, flattened per-stream buses, beat-aligned addresses, `i_cmd_len` is the whole transfer (up to 256 beats) and the master splits it into bursts, several commands in flight. Specification: [axi-ddr-master.md](axi-ddr-master.md).
+
 ```vhdl
 entity axi_master_rd is
   port (
     i_clk, i_rst : in std_logic;
     i_cmd_valid : in std_logic;  o_cmd_ready : out std_logic;
-    i_cmd_addr  : in unsigned(AXI_ADDR_W-1 downto 0);        -- byte address, aligned to the burst start
+    i_cmd_addr  : in unsigned(AXI_ADDR_W-1 downto 0);        -- byte address, beat aligned
     i_cmd_len   : in unsigned(7 downto 0);                    -- beats minus 1 (0 in v1)
     o_rsp_valid : out std_logic; i_rsp_ready : in std_logic;
     o_rsp_data  : out std_logic_vector(AXI_DATA_W-1 downto 0);
@@ -193,7 +198,7 @@ entity axi_master_wr is
 end entity;
 ```
 
-The two entities share the `m_axi` port bundle at the top level. The master must not cross 4 KB boundaries within a burst (AXI rule); the address generator and the loader are responsible for splitting commands.
+The two entities share the `m_axi` port bundle at the top level. No burst may cross a 4 KB boundary (AXI rule); the master splits every command at 4 KB boundaries and at the board's burst limit (decided 2026-11-09), so requesters never need the rule.
 
 ---
 
@@ -253,7 +258,7 @@ end entity;
 **Done and error.** `o_done` comes after the core is done, the fifo is empty and the last write response has arrived, so the ARM never reads stale DDR. A response with an error sets a flag that is reported as an `o_error` pulse together with `o_done`; v1 does not abort, the layer runs to the end. The flag is cleared at the next start. `o_busy` rises one clock after `i_start`, which is what `axi_lite_regs` assumes.
 
 **Assumptions about the masters (proposal, to agree with the master owner).**
-- One command at a time on each channel, responses in order (so there is no tag or ordering question).
+- One command at a time on each channel, responses in order (so there is no tag or ordering question). The masters themselves allow several commands in flight; `conv_engine_v1` still issues one at a time.
 - `i_cmd_addr` is beat aligned; the engine aligns it itself, so a master that aligns again is fine.
 - `o_rd_rsp_ready` is 1 only while the engine waits for a response, a response is held until it is accepted.
 - `i_wr_error` is only looked at together with `i_wr_done`, and `i_rd_rsp_error` together with `i_rd_rsp_valid`.
@@ -474,7 +479,7 @@ The width of `o_skip_data` depends on open point 6: if the requantized shortcut 
 
 ## Simulation only
 
-- **`axi_mem_model`**: AXI4 slave memory behind the AXI master port, preloaded from the exported files, with configurable latency and back-pressure, and a dump of its contents at the end.
+- **`axi_mem_model`**: AXI4 slave memory behind the AXI master port, preloaded from the exported files, with configurable latency and back-pressure, and a dump of its contents at the end. Implemented in `vhdl/tests/models/axi_mem_model.vhd`: the testbench preloads and reads back through the backdoor procedures `mem_write` and `mem_read`.
 - **`golden_io`**: reads the golden vectors of task 0.5 with `std.textio` (activations, weights, bias, expected accumulators and outputs) and compares them against the design's results, reporting the first mismatch.
 - **Testbenches**: one per module above (`tb_<module>.vhd`), then a layer-level testbench driving the full top level through its AXI-Lite port (task 2.2).
 

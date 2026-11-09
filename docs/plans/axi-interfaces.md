@@ -1,6 +1,6 @@
 # AXI interfaces of the accelerator
 
-Status: working summary of what `architecture-spec.md` (section 2) and `vhdl-modules.md` already say, written as one overview. The final target is the Avnet Ultra96 (Zynq UltraScale+ MPSoC, ARM Cortex-A53). The ZedBoard (Zynq-7000) was only used for the first test session, so its port names do not apply. The PS port names below are from memory and depend on the block design (D4, still open), so check them in Vivado.
+Status: working summary of what `architecture-spec.md` (section 2) and `vhdl-modules.md` already say, written as one overview. The final target is the Avnet Ultra96 (Zynq UltraScale+ MPSoC, ARM Cortex-A53). The ZedBoard (Zynq-7000) is used first and the Ultra96 stays the final target; the data link switches between them with one constant (`BOARD` in `camus_pkg`), see [axi-ddr-master.md section 3](axi-ddr-master.md#3-platforms). The PS port names below are from memory and depend on the block design (D4, still open), so check them in Vivado.
 
 ## 1. Short answer
 
@@ -37,7 +37,7 @@ The ARM never sends feature maps or weights to the accelerator. It only writes t
 | What it carries | layer registers: `IN_BASE`, `W_BASE`, `B_BASE`, `OUT_BASE`, layer dimensions, start, status, cycle count | inputs, weights and bias (read), int32 results (write) |
 | Traffic | a few register writes per layer | nearly all of the bytes moved |
 | Speed need | low, simple 32-bit registers | high, sets how fast the accelerator can run |
-| MPSoC PS port (to confirm) | PS master port: `M_AXI_HPM0_LPD` (low power domain, enough for registers) or `M_AXI_HPM0_FPD` / `M_AXI_HPM1_FPD` | PS slave port: `S_AXI_HP0_FPD` to `S_AXI_HP3_FPD` (not coherent) or `S_AXI_HPC0_FPD` / `S_AXI_HPC1_FPD` (I/O coherent) |
+| MPSoC PS port (to confirm) | PS master port: `M_AXI_HPM0_LPD` (low power domain, enough for registers) or `M_AXI_HPM0_FPD` / `M_AXI_HPM1_FPD` | PS slave port: `S_AXI_HP0_FPD` to `S_AXI_HP3_FPD` (not coherent) or `S_AXI_HPC0_FPD` / `S_AXI_HPC1_FPD` (I/O coherent). ZedBoard: `S_AXI_HP0` to `S_AXI_HP3` (AXI3, 64 bit) or ACP |
 | VHDL module | `axi_lite_regs` (task 1.4) | `axi_master_rd` and `axi_master_wr` (task 2.3) |
 | Port names | `s_axi_*` | `m_axi_*` |
 
@@ -52,9 +52,9 @@ The ARM never sends feature maps or weights to the accelerator. It only writes t
 ## 5. Things that follow from this
 
 - **Cache coherency.** The HP ports are not cache-coherent. The ARM caches and DDR can disagree, so the driver must flush the caches before the accelerator reads and invalidate them before the ARM reads the results, or use non-cached buffers. The Ultra96 also offers the HPC ports, which go through the cache coherent interconnect and make the accelerator I/O coherent, so the manual cache maintenance could be dropped. Choosing between HP and HPC is part of D4.
-- **Data width.** One 128-bit AXI beat is 16 bytes, which is one pixel of a 16-channel block (L = 16) in int8. This is why the feature map layout is 16-channel-blocked (D3). `AXI_DATA_W = 128` is a generic, not a literal, because the width depends on the block design.
+- **Data width.** On the Ultra96 one 128-bit AXI beat is 16 bytes, which is one pixel of a 16-channel block (L = 16) in int8. This is why the feature map layout is 16-channel-blocked (D3). On the ZedBoard the HP port is 64 bit, so a pixel is 2 beats. `AXI_DATA_W` is not a literal: it follows `BOARD` in `camus_pkg` ([axi-ddr-master.md section 3](axi-ddr-master.md#3-platforms)).
 - **Byte addresses.** The registers hold byte addresses, and the AXI master takes byte addresses. Element addresses from the layout formula are converted in `addr_gen`.
-- **v1 versus later.** v1 uses single-beat reads. Bursts (`len > 1`) come with the line buffers in step 4.1. From step 4.6 a second AXI read stream carries the skip tensor for the fused residual add.
+- **v1 versus later.** v1 uses single-beat reads. The masters take commands of up to 256 beats and split them into legal bursts themselves; requesters use bursts from step 4.1 (line buffers, weights). From step 4.6 the skip tensor for the fused residual add is read stream 3 (ARID 3) of the same master ([axi-ddr-master.md section 6](axi-ddr-master.md#6-read-path-axi_master_rd)).
 - **Port naming.** The AXI ports keep their standard names (`s_axi_*`, `m_axi_*`) so Vivado can infer the interface bundles. Everything else follows the `i_`/`o_` convention.
 - **Reset.** The top level inverts the active-low AXI reset once for the internal modules, which use the active-high `i_rst`.
 
@@ -86,7 +86,7 @@ All registers are 32 bit, word aligned, byte offsets from the base address of th
 
 Behavior worth knowing in the driver:
 
-- **Lock while busy.** Layer register writes are ignored while STATUS.busy is 1 (the write is still answered with OKAY). CTRL stays writable, so the ARM can soft reset a running layer.
+- **Lock while busy.** Layer register writes are ignored while STATUS.busy is 1 (the write is still answered with OKAY). CTRL stays writable, so the ARM can soft reset a running layer. Until technical debt TD-3 is paid, a soft reset while AXI bursts are in flight can hand stale read data to the engine's next command ([axi-ddr-master.md TD-3](axi-ddr-master.md#td-3-soft-reset-while-a-burst-is-in-flight)).
 - **Unused bits.** Bits outside the listed field do not exist and read 0. FY, FX and STRIDE at 0 and LANES at 0 reach the datapath as 1, lanes above 16 as 16, so an unprogrammed register can never give an illegal configuration. The register still reads back what was written.
 - **Polling.** Poll STATUS.done, not "not busy": busy may rise a clock or two after the start write. Done is cleared by the start, so it is safe to poll right after.
 - **Unmapped offsets.** Reads return 0, writes are ignored, both answer OKAY (no SLVERR).

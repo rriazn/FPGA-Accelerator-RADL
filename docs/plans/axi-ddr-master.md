@@ -1,6 +1,6 @@
 # Feature: AXI4 burst master between the accelerator and DDR
 
-Status: **in implementation**. AXI-P1 was done on 2026-11-09 ([plan progress](../../.gateflow/plans/axi-ddr-master.md#progress)). The repo's `BOARD` is still `ULTRA96` until the owner agrees to flip the default to `ZEDBOARD` ([Q8](#14-open-questions)). This file holds the scope of the feature: anything not listed under [In scope](#in-scope) belongs to another task. The implementation plan is [`.gateflow/plans/axi-ddr-master.md`](../../.gateflow/plans/axi-ddr-master.md).
+Status: **implemented and verified in simulation** (2026-11-09), all phases AXI-P1 to AXI-P6 ([plan progress](../../.gateflow/plans/axi-ddr-master.md#progress), results in [section 3.3](#33-verified-so-far)). Open: the board run (TD-1, TD-2), TD-3, and the flip of the repo's `BOARD` from `ULTRA96` to `ZEDBOARD`, which waits for the `camus_pkg` owner ([Q8](#14-open-questions)). This file holds the scope of the feature: anything not listed under [In scope](#in-scope) belongs to another task. The implementation plan is [`.gateflow/plans/axi-ddr-master.md`](../../.gateflow/plans/axi-ddr-master.md).
 
 This feature is the **data link** from [`axi-interfaces.md` section 1](axi-interfaces.md#L5): accelerator to DDR, full AXI4 with bursts, with the accelerator as master. It delivers:
 - deliverable row **L4**: masters plus a simulation memory model ([`deliverable-11-11.md:67`](../deliverable-11-11.md#L67));
@@ -13,7 +13,7 @@ Everything between the CPU and the accelerator is outside it.
 | Date | Topic | Decision |
 |---|---|---|
 | 2026-11-09 | Board | **ZedBoard now; Ultra96 later and for good.** <br>- Built for the ZedBoard: 64-bit HP port, AXI3 limits. <br>- Switching to the Ultra96 is one line ([section 3.2](#32-switching-to-the-ultra96)). |
-| 2026-11-09 | 4 KB rule | **The master splits** (revised the same day; the first choice was "requesters split"). <br>- Requesters send up to 256 beats at any beat-aligned address and never need the rule. <br>- The master cuts every command at 4 KB and at the board's burst limit ([section 9](#9-burst-splitting-rule-inside-the-master)). <br>- This replaces [`vhdl-modules.md:196`](vhdl-modules.md#L196). |
+| 2026-11-09 | 4 KB rule | **The master splits** (revised the same day; the first choice was "requesters split"). <br>- Requesters send up to 256 beats at any beat-aligned address and never need the rule. <br>- The master cuts every command at 4 KB and at the board's burst limit ([section 9](#9-burst-splitting-rule-inside-the-master)). <br>- This replaces [`vhdl-modules.md:201`](vhdl-modules.md#L201). |
 | 2026-11-09 | Soft reset with bursts in flight | Direction: **drain in the master**. Deferred as technical debt [TD-3](#td-3-soft-reset-while-a-burst-is-in-flight). |
 | 2026-11-09 | Scope | Accelerator ↔ DDR over full AXI4 only. The CPU ↔ accelerator side is outside. |
 | 2026-11-09 | HP vs HPC | **Under discussion** ([section 4](#4-port-choice-hp-vs-hpc-under-discussion)). Interim choice: HP. |
@@ -43,12 +43,12 @@ Everything between the CPU and the accelerator is outside it.
 - **The CPU ↔ accelerator side:**
   - the AXI-Lite control link (`axi_lite_regs`), including where a soft-reset pulse comes from;
   - the ARM driver, cache maintenance and buffer allocation.
-- **`conv_accel_top`** ([task 2.3](vhdl-accelerator-tasks.md#L74), [`vhdl-modules.md:102`](vhdl-modules.md#L102)). It instantiates `axi_ddr_master` (F9); building the top itself is not part of this feature.
+- **`conv_accel_top`** ([task 2.3](vhdl-accelerator-tasks.md#L74), [`vhdl-modules.md:105`](vhdl-modules.md#L105)). It instantiates `axi_ddr_master` (F9); building the top itself is not part of this feature.
 - **Changing `conv_engine_v1`** so that it keeps more than one read in flight. The master supports it, but the engine change is its own task.
 - **The future requesters** of [step 4.1](vhdl-accelerator-tasks.md#L93) and [step 4.6](vhdl-accelerator-tasks.md#L98):
-  - who they are: [`weight_loader`](vhdl-modules.md#L291), the line-buffer fill driven by [`layer_sequencer`](vhdl-modules.md#L386), and [`skip_reader`](vhdl-modules.md#L453);
+  - who they are: [`weight_loader`](vhdl-modules.md#L296), the line-buffer fill driven by [`layer_sequencer`](vhdl-modules.md#L391), and [`skip_reader`](vhdl-modules.md#L458);
   - what they do here: send whole transfers of up to 256 beats, which the master splits, and get a stream slot.
-  - **ZedBoard note for them:** a 16-channel int8 pixel is 2 beats at 64 bit. Their pixel-wide ports ([`vhdl-modules.md:318`](vhdl-modules.md#L318), [`:465`](vhdl-modules.md#L465)) then need a 2-beat-to-pixel packer on their side.
+  - **ZedBoard note for them:** a 16-channel int8 pixel is 2 beats at 64 bit. Their pixel-wide ports ([`vhdl-modules.md:323`](vhdl-modules.md#L323), [`:470`](vhdl-modules.md#L470)) then need a 2-beat-to-pixel packer on their side.
 - **The Vivado block design** ([task 3.3](vhdl-accelerator-tasks.md#L82)), apart from the HP port facts in [section 3](#3-platforms).
 - **Any Xilinx AXI DMA IP.** [D3](vhdl-accelerator-tasks.md#L38) chose a custom master.
 
@@ -138,7 +138,21 @@ A reviewer also confirmed that no code in `vhdl/` needs `AXI_DATA_W` to be 128 o
 - **Regression:** the whole existing regression passes again.
 - **Boards:** everything was run with `ULTRA96` and with a `ZEDBOARD` copy.
 
-**GHDL note.** This GHDL build (LLVM/GCC backend) needs an explicit `ghdl -e <tb>` between `-a` and `-r`. The existing TB headers list only `-a` and `-r`.
+**AXI-P2 to AXI-P6 (2026-11-09).** One command runs everything for one board: [`vhdl/tests/run_axi_regression.sh`](../../vhdl/tests/run_axi_regression.sh) `zedboard|ultra96` (add `--golden` for b3sc).
+
+| What | Result |
+|---|---|
+| Full regression, `ZEDBOARD` (64 bit) | **73 of 73 runs pass** |
+| Full regression, `ULTRA96` (128 bit) | **73 of 73 runs pass** |
+| `tb_axi_mem_model` | 64 and 128 bit × 3 seeds; every one of its protocol checks catches an injected violation |
+| `tb_axi_master_rd` r1–r5 × 3 seeds | pass with zero model violations; up to ~2.4k out-of-order returns per run; splits at 4 KB, at the burst limit and by both; 4 planted bugs caught |
+| `tb_axi_master_wr` w1–w5 × 3 seeds | pass with zero model violations; all ordering modes; errors in the first, a middle and the final burst; 6 planted bugs caught |
+| `tb_conv_engine_axi`, tiny layers and error runs | pass on both boards |
+| `tb_conv_engine_axi`, golden **b3sc**, 2 runs | **bit-exact on both boards**: 12,544 results, 401,408 MACs, ~22 clocks per MAC (v1 is latency bound, see [section 6](#6-read-path-axi_master_rd)) |
+
+**GHDL notes.**
+- This GHDL build (LLVM/GCC backend) needs an explicit `ghdl -e <tb>` between `-a` and `-r`. The existing TB headers list only `-a` and `-r`.
+- VHDL-2008 external names fail at run time in this build. The master TBs therefore observe credits and outstanding bursts on the bus instead of inside the DUT.
 
 ### 3.4 Check on the ZedBoard (facts not yet confirmed)
 
@@ -229,7 +243,7 @@ Reads and writes share one `m_axi` bundle and one HP port. AR/R and AW/W/B are i
 
 ### Requester interface
 
-This is the planned interface ([`vhdl-modules.md:165`](vhdl-modules.md#L165)), widened to `G_N_RD` streams. The buses are flattened: stream `s` uses slice `s`. Address and length stay `unsigned`, as in the planned interface. `conv_engine_v1` connects to stream 0 unchanged, through `(0)` element associations ([plan F5](../../.gateflow/plans/axi-ddr-master.md#f5-axi_master_rd)).
+This is the planned interface ([`vhdl-modules.md:170`](vhdl-modules.md#L170)), widened to `G_N_RD` streams. The buses are flattened: stream `s` uses slice `s`. Address and length stay `unsigned`, as in the planned interface. `conv_engine_v1` connects to stream 0 unchanged, through `(0)` element associations ([plan F5](../../.gateflow/plans/axi-ddr-master.md#f5-axi_master_rd)).
 
 | Port | Dir | Width | Meaning |
 |---|---|---|---|
@@ -282,7 +296,7 @@ This is the planned interface ([`vhdl-modules.md:165`](vhdl-modules.md#L165)), w
 - **v1:** stream 0 (`conv_engine_v1`).
 - **From [step 4.1](vhdl-accelerator-tasks.md#L93):** streams 1 and 2 (weights, line-buffer fill).
 - **From [step 4.6](vhdl-accelerator-tasks.md#L98):** stream 3 (skip tensor).
-- **After 4.1–4.3:** `layer_sequencer` replaces `conv_engine_v1` ([`vhdl-modules.md:386`](vhdl-modules.md#L386)), so stream 0 is free again.
+- **After 4.1–4.3:** `layer_sequencer` replaces `conv_engine_v1` ([`vhdl-modules.md:391`](vhdl-modules.md#L391)), so stream 0 is free again.
 
 **Note for v1.** `conv_engine_v1` issues one single-beat read at a time and waits for it, so this master does not make v1 faster. A reviewer traced about 9 clocks per read at zero slave latency. The performance model already says v1 is limited by latency ([`performance-model.md:48`](performance-model.md#L48)). The gain comes once requesters issue bursts and keep several commands open ([step 4.1](vhdl-accelerator-tasks.md#L93)).
 
@@ -300,7 +314,7 @@ With the placeholder latency of 30 clocks ([`performance-model.md:28`](performan
 
 There is one write stream for now: the result path is the only writer, both in v1 and in the target design.
 
-The interface is the planned one ([`vhdl-modules.md:179`](vhdl-modules.md#L179)), with `unsigned` address and length. The `conv_engine_v1` ports connect directly: `o_wr_data_valid` → `i_wdata_valid`, `i_wr_done` ← `o_done`, and so on.
+The interface is the planned one ([`vhdl-modules.md:184`](vhdl-modules.md#L184)), with `unsigned` address and length. The `conv_engine_v1` ports connect directly: `o_wr_data_valid` → `i_wdata_valid`, `i_wr_done` ← `o_done`, and so on.
 
 1. **Command slot and splitter.** It holds `(addr, beats_left)` and uses the same split rule as reads: `n = burst_beats(...)`.
 2. **AW only once the data is there.** AW for a burst of `n` beats is issued only when both hold:
@@ -345,7 +359,7 @@ m_axi_bid, m_axi_bresp(1:0), m_axi_bvalid, m_axi_bready
 ```
 
 - There is no WID: the master is AXI4, and on the ZedBoard the converter adds it.
-- The wrapper only joins the two halves ([`vhdl-modules.md:111`](vhdl-modules.md#L111)): `axi_master_rd` drives AR/R and `axi_master_wr` drives AW/W/B.
+- The wrapper only joins the two halves ([`vhdl-modules.md:114`](vhdl-modules.md#L114)): `axi_master_rd` drives AR/R and `axi_master_wr` drives AW/W/B.
 
 ---
 
@@ -416,7 +430,7 @@ A valid never depends on a ready in the same clock. Once valid is high, it stays
 - **Acceptance limit:** configurable.
 - **Errors:** SLVERR in an address window, switched on and off by an input, so a TB can inject in one run only.
 - **Burst-length limit:** `G_MAX_BURST`; 16 models the ZedBoard's AXI3 port.
-- **Backdoor procedures** for preload and dump ([`vhdl-modules.md:477`](vhdl-modules.md#L477)).
+- **Backdoor procedures** for preload and dump ([`vhdl-modules.md:482`](vhdl-modules.md#L482)).
 
 **Checks** (assertions in the model, the masters and the TBs):
 1. No burst crosses 4 KB. AxLEN + 1 ≤ `G_MAX_BURST`. AxSIZE and AxBURST have their fixed values.
@@ -491,9 +505,9 @@ These are known gaps, deferred on purpose. Each one has an interim value or beha
 | Q7 | Soft reset with bursts in flight | **Direction decided** (drain), **technical debt** [TD-3](#td-3-soft-reset-while-a-burst-is-in-flight) |
 | Q8 | Sign-off on the shared `camus_pkg` change (F1) | **Partly done.** <br>- `axi_pkg` needs the `board_t` type, so the board block landed with AXI-P1 with `BOARD := ULTRA96` (`AXI_DATA_W` stays 128, so the owner's code is unchanged). <br>- **Open:** the owner's agreement to flip the default to `ZEDBOARD`. That is the one-line switch of [section 3.2](#32-switching-to-the-ultra96), run in the other direction. |
 
-### Docs to update when the feature lands (phase AXI-P6)
+### Docs updated in AXI-P6 (2026-11-09)
 
-| Doc line | Says today | Update to |
+| Doc line | Said before | Now says |
 |---|---|---|
 | [`axi-interfaces.md:3`](axi-interfaces.md#L3) | ZedBoard "only used for the first test session" | ZedBoard now, Ultra96 later ([section 3](#3-platforms)) |
 | [`axi-interfaces.md:40`](axi-interfaces.md#L40) | only MPSoC port names | add the ZedBoard `S_AXI_HP0` |
@@ -506,11 +520,11 @@ These are known gaps, deferred on purpose. Each one has an interim value or beha
 | [`vhdl-accelerator-tasks.md:39`](vhdl-accelerator-tasks.md#L39) (D4) | board revision open | ZedBoard bring-up (64-bit HP0, AXI3), Ultra96 later |
 | [`vhdl-modules.md:10`](vhdl-modules.md#L10) | AXI port naming "open" | decided: standard lowercase `m_axi_*` |
 | [`vhdl-modules.md:12`](vhdl-modules.md#L12) | `AXI_DATA_W = 128` | board dependent via `camus_pkg.BOARD` |
-| [`vhdl-modules.md:18`](vhdl-modules.md#L18) to `:41` | masters listed without a folder; no rows for the helpers | masters, `axi_skid`, `sync_fifo` and `axi_ddr_master` in `src/interface/`; `axi_pkg` in `src/` |
-| [`vhdl-modules.md:165`](vhdl-modules.md#L165) to `:193` | single-stream entities; `i_cmd_addr` "aligned to the burst start" | multi-stream read master, beat-aligned addresses, whole-transfer `i_cmd_len`, wrapper |
-| [`vhdl-modules.md:196`](vhdl-modules.md#L196) | the requester splits commands | the master splits |
-| [`vhdl-modules.md:256`](vhdl-modules.md#L256) | one command at a time, responses in order | the masters allow several; the v1 engine still uses one |
-| [`vhdl-modules.md:477`](vhdl-modules.md#L477) | model "preloaded from the exported files … dump" | backdoor preload and dump procedures |
+| [`vhdl-modules.md:18`](vhdl-modules.md#L18) to `:44` | masters listed without a folder; no rows for the helpers | masters, `axi_skid`, `sync_fifo` and `axi_ddr_master` in `src/interface/`; `axi_pkg` in `src/` |
+| [`vhdl-modules.md:170`](vhdl-modules.md#L170) to `:198` | single-stream entities; `i_cmd_addr` "aligned to the burst start" | multi-stream read master, beat-aligned addresses, whole-transfer `i_cmd_len`, wrapper |
+| [`vhdl-modules.md:201`](vhdl-modules.md#L201) | the requester splits commands | the master splits |
+| [`vhdl-modules.md:261`](vhdl-modules.md#L261) | one command at a time, responses in order | the masters allow several; the v1 engine still uses one |
+| [`vhdl-modules.md:482`](vhdl-modules.md#L482) | model "preloaded from the exported files … dump" | backdoor preload and dump procedures |
 | [`performance-model.md:27`](performance-model.md#L27) | AXI width 128 (placeholder) | 64 on the ZedBoard (`--axi-bits 64`) |
 | [`deliverable-11-11.md:67`](../deliverable-11-11.md#L67) (L4) | no status | status of this feature |
 
@@ -534,10 +548,10 @@ These are known gaps, deferred on purpose. Each one has an interim value or beha
 | D3 custom AXI master, D4 board and tools, D5 200 MHz | [`vhdl-accelerator-tasks.md:38`](vhdl-accelerator-tasks.md#L38), [`:39`](vhdl-accelerator-tasks.md#L39), [`:40`](vhdl-accelerator-tasks.md#L40) |
 | Tasks 2.3, 3.3, 4.0, 4.1, 4.6 | [`:74`](vhdl-accelerator-tasks.md#L74), [`:82`](vhdl-accelerator-tasks.md#L82), [`:92`](vhdl-accelerator-tasks.md#L92), [`:93`](vhdl-accelerator-tasks.md#L93), [`:98`](vhdl-accelerator-tasks.md#L98) |
 | Reset rule, AXI port naming, file locations | [`vhdl-modules.md:9`](vhdl-modules.md#L9), [`vhdl-modules.md:10`](vhdl-modules.md#L10), [`vhdl-modules.md:18`](vhdl-modules.md#L18) |
-| Planned top and masters | [`vhdl-modules.md:102`](vhdl-modules.md#L102), [`:160`](vhdl-modules.md#L160), [`:165`](vhdl-modules.md#L165), [`:179`](vhdl-modules.md#L179) |
-| 4 KB rule, old version (on the requester), replaced | [`vhdl-modules.md:196`](vhdl-modules.md#L196) |
-| `conv_engine_v1`'s assumptions about the master | [`vhdl-modules.md:256`](vhdl-modules.md#L256) |
-| Future requesters | [`vhdl-modules.md:291`](vhdl-modules.md#L291), [`:308`](vhdl-modules.md#L308), [`:386`](vhdl-modules.md#L386), [`:453`](vhdl-modules.md#L453) |
+| Planned top and masters | [`vhdl-modules.md:105`](vhdl-modules.md#L105), [`:163`](vhdl-modules.md#L163), [`:170`](vhdl-modules.md#L170), [`:184`](vhdl-modules.md#L184) |
+| 4 KB rule, old version (on the requester), replaced | [`vhdl-modules.md:201`](vhdl-modules.md#L201) |
+| `conv_engine_v1`'s assumptions about the master | [`vhdl-modules.md:261`](vhdl-modules.md#L261) |
+| Future requesters | [`vhdl-modules.md:296`](vhdl-modules.md#L296), [`:313`](vhdl-modules.md#L313), [`:391`](vhdl-modules.md#L391), [`:458`](vhdl-modules.md#L458) |
 | AXI width and latency placeholders | [`performance-model.md:27`](performance-model.md#L27), [`performance-model.md:28`](performance-model.md#L28), [`tools/perf_model.py:148`](../../tools/perf_model.py#L148) |
 | v1 is limited by latency | [`performance-model.md:48`](performance-model.md#L48) |
 | Engine command ports and beat helpers | [`conv_engine_v1.vhd:24`](../../vhdl/src/compute-engine/conv_engine_v1.vhd#L24), [`:61`](../../vhdl/src/compute-engine/conv_engine_v1.vhd#L61), [`:70`](../../vhdl/src/compute-engine/conv_engine_v1.vhd#L70) |

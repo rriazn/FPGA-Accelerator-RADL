@@ -33,7 +33,7 @@ An int8 convolution accelerator in the programmable logic (PL) of the Avnet Ultr
   L = 16 normally; L = 1 for the raw single-channel frame (plain [H][W] image)
   ```
 
-  One pixel of one channel block is L contiguous elements: 16 bytes for int8 (one beat of a 128-bit AXI port), 64 bytes for int32 accumulators. Channel counts are padded to a multiple of 16 in memory. **Proposal:** lanes beyond K are written as zero.
+  One pixel of one channel block is L contiguous elements: 16 bytes for int8 (one beat of the Ultra96's 128-bit AXI port, two beats of the ZedBoard's 64-bit port), 64 bytes for int32 accumulators. Channel counts are padded to a multiple of 16 in memory. **Proposal:** lanes beyond K are written as zero.
 - **Output dimensions** are derived by the hardware: `OH = (H + 2*PAD - FY) / STRIDE + 1`, same for OW. Padding is symmetric, zero.
 
 ## 4. Layer registers (AXI-Lite)
@@ -78,7 +78,7 @@ Per output pixel, the array computes 16 output channels at once for **one input 
 - **Weights:** all 76,432 weights (plus 1,344 B of bias) resident in BRAM. The array needs 16 x 9 = 144 weights per cycle (1,152 bit), so the weight memory is banked per output lane. Roughly 16 BRAM36 are needed for bandwidth and 17 to 19 for capacity, depending on whether the parity bits can be used (*estimate*; check BRAM port widths and capacity in the datasheet).
 - **PE array:** 16 lanes x 9 MACs = 144 DSP48E2 (72 with int8 packing, step 4.5), each lane with an adder tree over its 9 products.
 - **Accumulation:** 16 accumulators, initialized with the bias, accumulate over the input channels (output stationary). After C cycles one output pixel for 16 channels is complete.
-- **Write-back:** 16 x int32 = 64 B burst through the AXI master. From step 4.6: requant (16 DSP, 16-bit multiplier), ReLU clip, and residual add in this path, with a second AXI read stream for the skip tensor.
+- **Write-back:** 16 x int32 = 64 B burst through the AXI master. From step 4.6: requant (16 DSP, 16-bit multiplier), ReLU clip, and residual add in this path, with the skip tensor as a second read stream (stream 3) of the same AXI master ([axi-ddr-master.md](axi-ddr-master.md)).
 - **1x1 convs** (`b2sc`, `b3sc`) use 1 of 9 taps, so 16 of 144 MACs are active during those layers.
 - **Pipelining (4.4):** one new set of products per cycle; the adder tree and accumulator are pipelined to reach 200 MHz.
 

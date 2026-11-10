@@ -5,6 +5,9 @@ build/
 # c binaries
 c/camus_naive_O0
 c/camus_naive_O2
+c/camus_accel
+c/accel_probe
+c/accel_golden
 c/armhf/
 *.exe
 *.o

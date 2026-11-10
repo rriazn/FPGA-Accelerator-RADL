@@ -164,8 +164,13 @@ begin
         v_lane := to_integer(s_wr_addr(C_OFF_W-1 downto 2));
         v_data := (others => '0');
         v_strb := (others => '0');
-        v_data(32 * v_lane + 31 downto 32 * v_lane) := std_logic_vector(s_wr_data);
-        v_strb(4 * v_lane + 3 downto 4 * v_lane) := "1111";
+        -- constant slice bounds, a variable bounded slice stops GHDL synthesis
+        for i in 0 to C_BEAT_BYTES / 4 - 1 loop
+            if i = v_lane then
+                v_data(32 * i + 31 downto 32 * i) := std_logic_vector(s_wr_data);
+                v_strb(4 * i + 3 downto 4 * i) := "1111";
+            end if;
+        end loop;
         o_wr_data <= v_data;
         o_wr_strb <= v_strb;
     end process;

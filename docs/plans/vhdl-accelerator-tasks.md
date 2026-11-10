@@ -71,15 +71,15 @@ Plan optimization 1: one MAC unit, no buffering.
 |---|---|---|---|---|
 | 2.1 | Core | Conv engine FSM for one MAC unit: reads weight and input per MAC straight from DDR, accumulates in an int32 register, writes the accumulator out (D2). | 1.1, 1.3 | `conv_v1.vhd` |
 | 2.2 | Core | Layer-level testbench: every conv layer of ResNet-8 vs golden accumulators, then the random layers from 0.5. | 2.1, 0.5 | passing simulation |
-| 2.3 | Core, Sys | Top level with the AXI-Lite registers (1.4) and an AXI master to DDR; simulate end to end with a DDR model. | 2.2, 1.4 | `top_v1.vhd` |
+| 2.3 | Core, Sys | Top level with the AXI-Lite registers (1.4) and an AXI master to DDR; simulate end to end with a DDR model. **Done 2026-11-10 in simulation, not yet synthesized:** `vhdl/src/conv_accel_top.vhd`, tested through the AXI-Lite port by `tb_conv_accel_top` on the tiny layers at 64 and 128 bit, and bit-exact on the golden layers stem, b2sc and b3sc (128 bit, frame f000, one run each); the six layers of 3.6 M MACs and more are not run in simulation (hours). The soft reset pulse is left unwired until TD-3 ([vhdl-modules.md](vhdl-modules.md#conv_accel_top-task-23)). | 2.2, 1.4 | `conv_accel_top.vhd` + tb |
 
 ## Phase 3: System integration (starts after 0.3, runs in parallel with Phases 1 and 2)
 
 | ID | Area | Task | Needs | Output |
 |---|---|---|---|---|
-| 3.1 | Sys | ARM driver in C: write registers, start, wait for done, read the cycle counter. First against a software stand-in of the accelerator (the naive conv from `c/camus_naive.c`) so it can be developed before hardware exists. | 0.3 | `driver.c` |
-| 3.2 | Sys | ARM side of the network: tiling if a layer exceeds on-chip limits, requant/ReLU/residual add (until 4.6), global pooling, FC, argmax. Check bit-exactness against `test_logits.bin`. | 3.1 | C inference using the accelerator |
-| 3.3 | Sys | Vivado block design: Zynq PS, AXI-Lite and AXI master/DMA connections, clock, reset, address map. | 0.2, 0.3 | block design |
+| 3.1 | Sys | ARM driver in C: write registers, start, wait for done, read the cycle counter. First against a software stand-in of the accelerator (the naive conv from `c/camus_naive.c`) so it can be developed before hardware exists. **Done 2026-11-10 against the stand-in:** `c/accel.c`, `c/accel_regs.h`, `c/accel_sim.c`; the board backend `c/board_platform.c` (register mmap, reserved DDR through `/dev/mem`, uncached, so no cache maintenance) is written with the addresses as command-line parameters and tested only against a fake `/dev/mem` file, not on a board; the real addresses need D4 and the block design (3.3). Bring-up test: `c/accel_probe.c`. | 0.3 | `driver.c` |
+| 3.2 | Sys | ARM side of the network: tiling if a layer exceeds on-chip limits, requant/ReLU/residual add (until 4.6), global pooling, FC, argmax. Check bit-exactness against `test_logits.bin`. **Done 2026-11-10 against the stand-in:** `c/camus_accel.c`, bit-exact on all 200 frames. No tiling is needed (every layer fits), and no layout conversion either: weights and bias are the exported layout, the raw frame is lanes = 1, and the later maps stay blocked because the ARM steps are elementwise; only the global pool maps indices. | 3.1 | C inference using the accelerator |
+| 3.3 | Sys | Vivado block design: Zynq PS, AXI-Lite and AXI master/DMA connections, clock, reset, address map. Step-by-step checklist (written without Vivado, untested): [vivado-block-design.md](vivado-block-design.md). | 0.2, 0.3 | block design |
 | 3.4 | Pipe | Run the naive C baseline on the A53 (`c/`, `-O0` and `-O2`) and record latency, accuracy and the deadline check. | 0.2 | baseline numbers |
 | 3.5 | Sys | Benchmark and power harness: timers on the ARM, the accelerator cycle counter, a procedure for the DC power meter on the board supply (idle vs loaded, long runs via the `reps` argument of the C program). Energy is measured only (D7). | 3.4 | measurement procedure |
 

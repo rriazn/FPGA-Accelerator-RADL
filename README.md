@@ -126,6 +126,31 @@ On the board, `c/board_run.sh` records the conditions and runs both binaries pin
 
 Host results (x86 under Docker, not the board, so only useful as a correctness check): bit-exact on all 200 frames, 95.5 % accuracy, 278 ms/frame at `-O0` and 65 ms/frame at `-O2`. The numbers that count come from running it on the board.
 
+## ARM side of the accelerator (`c/`)
+
+`c/camus_accel.c` runs the same network with the nine conv layers on the accelerator and the rest on the ARM, as decided in D2: the accelerator returns the int32 accumulator (bias included), the ARM does requant, ReLU, residual add, global pool and FC. It uses the driver in `c/accel.c` (register map in `c/accel_regs.h`, same as `axi_lite_regs.vhd`) through a `platform_t` (registers, DMA buffers, cache flush and invalidate). There are two backends. Without options `c/accel_sim.c` is used, a software stand-in that models the register file and the result of `conv_engine_v1`, so the program checks the driver, the layouts and the ARM side on the host; it is bit-exact to `test_logits.bin` on all 200 frames (95.5 %). With `--regs` and `--mem` the same programs run on the board through `c/board_platform.c` (**written but not yet tested on a board**).
+
+```sh
+cd c
+make run-accel        # builds accel_probe and camus_accel and runs both on the stand-in
+./camus_accel ../build/export 10      # first 10 test frames only
+# on the board, as root:
+./accel_probe --regs 0x43C00000 --mem 0x1F000000:0x1000000       # bring-up test, run this first
+./camus_accel ../build/export --regs 0x43C00000 --mem 0x1F000000:0x1000000
+```
+
+Static ARMv7 binaries for the board: `make cross-accel` (in the Docker image, like `make cross`) writes `c/armhf/camus_accel` and `c/armhf/accel_probe`; `make package` takes everything in `c/armhf/`.
+
+`--regs` is the physical base address of the AXI-Lite slave (Vivado address editor), `--mem` is a range of DDR reserved for the DMA buffers as `<address>:<size>` (hex or decimal). Both are parameters because they come from the block design and the boot setup (open, D4); the addresses above are examples. About 1 MB is enough. The reserved range must be invisible to Linux (kernel `mem=` argument or a reserved-memory node in the device tree), page aligned, and below 4 GB.
+
+The board backend maps both through `/dev/mem` with `O_SYNC`, so the buffers are uncached and no cache maintenance is needed (decision A: simplest for v1, the ARM steps are slow on uncached memory, which does not matter while the hardware needs seconds per frame). Copies into DMA memory use byte accesses (`dma_copy`) because `memcpy` may use accesses an uncached mapping does not take. For a faster ARM side later: a cached mapping with kernel-side sync (`udmabuf`), or the ACP port in the block design.
+
+`c/accel_probe.c` is the bring-up test and needs no export files. It checks that STATUS is not busy, writes and reads back the layer registers with the hardware bit masks, and runs the five small layers of the VHDL testbench (lanes 1 and 16, padded channels, stride, 1x1) against a reference conv. Junk is put into the padding lanes of the input, and the padding lanes and the bytes after the output must stay untouched. On the board, check these in order: the probe, then the golden layers, then `camus_accel`.
+
+`c/accel_golden.c` is the golden-layer step: `./accel_golden ../build/export <layer> [frame]` (layers `stem b1c1 b1c2 b2c1 b2c2 b2sc b3c1 b3c2 b3sc`, default frame `f000`) runs one conv layer through the driver and compares all int32 accumulators with `build/export/golden/<frame>/<layer>_acc.mem`, the files the VHDL testbenches use. On the stand-in all nine layers are bit-exact for `f000` (`make run-accel` runs them), which also confirms the golden files against the layouts. `make package` leaves the golden directory out (13 MB); copy `build/export/golden/f000` to the board by hand. Start with the small layers (`b3sc`, `b2sc`, `stem`: about 0.4 M MACs each), the others take seconds each on v1. The block design steps are in `docs/plans/vivado-block-design.md`.
+
+Layouts: weights (`[K][C][FY][FX]` int8) and bias (int32) are the exported ones and need no conversion. The raw frame is the plain `[H][W]` image (lanes = 1). All later maps stay in the blocked `[C/16][H][W][16]` layout, which works because requant, ReLU and the residual add are elementwise; only the global pool needs the index mapping. Layers with channels that are not a multiple of 16 are not supported yet (all ResNet-8 layers are).
+
 ## Open points
 
 - The requant multiplier is 16 bit (`MULT_BITS` in `quantize.py`); confirm with the FPGA owner.

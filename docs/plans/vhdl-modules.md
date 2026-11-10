@@ -30,7 +30,7 @@ Companion to `architecture-spec.md` (behavior, layout, registers), `architecture
 | `axi_pkg` (AXI constants, per-board limits, burst split rule) | `../axi_pkg.vhd` | v1, target | 2.3 | Sys |
 | `mac_int8` | `mac_int8.vhd` | v1 | 1.1 | Core |
 | `conv_engine_v1` | `conv_engine_v1.vhd` | v1 | 2.1 | Core |
-| `conv_accel_top` | `top.vhd` | v1, target | 2.3 | Core, Sys |
+| `conv_accel_top` | `../conv_accel_top.vhd` | v1, target | 2.3 | Core, Sys |
 | `weight_store` | `weight_store.vhd` | target | 4.1 | Core |
 | `weight_loader` | `weight_loader.vhd` | target | 4.1 | Core |
 | `line_buffer` | `line_buffer.vhd` | target | 4.1 | Core |
@@ -104,18 +104,28 @@ Writing `start` while `busy` sets `error` and is not forwarded. `done` is cleare
 
 ### `conv_accel_top` (task 2.3)
 
-Top level of the IP: clock, reset, the AXI-Lite slave and the AXI master port. Instantiates the modules of the active version.
+Top level of the IP: clock, reset, the AXI-Lite slave and the AXI master port. Instantiates the modules of the active version. Implemented as `vhdl/src/conv_accel_top.vhd` with the end to end testbench `vhdl/tests/integration/tb_conv_accel_top.vhd` (simulation only, not yet synthesized).
 
 ```vhdl
 entity conv_accel_top is
+  generic (
+    G_LITE_ADDR_W : natural := 8;      -- byte address bits of the register space, at least 7
+    G_ID_W        : positive := 2;     -- AXI ID bits of the master port
+    G_FIFO_DEPTH  : natural := 8       -- result fifo of the engine
+  );
   port (
-    i_clk, i_rst : in std_logic;
-    -- s_axi_*  : AXI4-Lite slave  (ARM control)
-    -- m_axi_*  : AXI4 master, AXI_DATA_W wide (DDR access, one bundle with read and write channels)
-    o_irq       : out std_logic                  -- optional
+    aclk, aresetn : in std_logic;      -- AXI names, the active-low reset is inverted once inside
+    -- s_axi_*  : AXI4-Lite slave, G_LITE_ADDR_W address bits, 32 bit data (ARM control)
+    -- m_axi_*  : AXI4 master, AXI_ADDR_W / AXI_DATA_W wide (DDR access, one bundle with read and write channels)
   );
 end entity;
 ```
+
+Instances: `axi_lite_regs` (`o_cfg`, `o_start`, status and cycles in and out), `conv_engine_v1`, and `axi_ddr_master` with one read stream. There is no `o_irq`, the ARM polls STATUS. The ports have no `i_`/`o_` prefix and the clock and reset are `aclk` and `aresetn`, following the AXI naming rule above.
+
+**Soft reset is not wired.** `axi_lite_regs` produces an `o_soft_rst` pulse, but the top leaves it open: the masters have no drain logic yet ([axi-ddr-master.md TD-3](axi-ddr-master.md#td-3-soft-reset-while-a-burst-is-in-flight)), so resetting the engine with bursts in flight could hand stale data to its next command. A soft reset write therefore only clears done and error in the registers. A hung layer is recovered by resetting the whole PL until TD-3 is paid.
+
+The testbench plays the ARM through the AXI-Lite port only, with the `axi_mem_model` behind the master port. It runs the tiny layers (and the golden layers with `-gG_LAYER=<name>`), twice on one instance, with optional SLVERR injection (`-gG_ERR`). It checks the reset values, start clearing done and error, the lock of the layer registers while busy, sticky done and error, CYCLES, every result word, and the number of reads and writes on the bus. It is part of `tests/run_axi_regression.sh`.
 
 ### `loop_nest` (task 1.3, v1)
 

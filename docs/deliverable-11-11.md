@@ -70,7 +70,7 @@ Board access starts Fri 10-30, and nothing here needs the board.
 
 ### Stretch tier
 
-`axi_lite_regs`, the top level, the Vivado block design, the ARM driver (with cache handling) and bring-up on the board: tasks 1.4, 2.3, 3.1, 3.3 and 4.0. Start only if L5 passes before Mon 11-06.
+`axi_lite_regs`, the top level, the Vivado block design, the ARM driver (with cache handling) and bring-up on the board: tasks 1.4, 2.3, 3.1, 3.3 and 4.0. Start only if L5 passes before Mon 11-06. **Status 2026-11-10:** `axi_lite_regs` (1.4) and the top level `conv_accel_top` (2.3) are done in simulation; synthesis, the block design (3.3), the driver (3.1) and bring-up (4.0) are open.
 
 ## 5. Measurement method and results table (proposal)
 

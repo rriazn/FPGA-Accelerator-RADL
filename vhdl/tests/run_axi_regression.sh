@@ -44,17 +44,19 @@ SRC="$PKG src/axi_pkg.vhd
      src/compute-engine/requant.vhd src/compute-engine/conv_core_v1.vhd src/compute-engine/conv_engine_v1.vhd
      src/interface/axi_lite_regs.vhd src/interface/sync_fifo.vhd src/interface/axi_skid.vhd
      src/interface/axi_master_rd.vhd src/interface/axi_master_wr.vhd src/interface/axi_ddr_master.vhd
+     src/conv_accel_top.vhd
      tests/models/axi_mem_model_pkg.vhd tests/models/axi_mem_model_shared.vhd tests/models/axi_mem_model.vhd
      tests/unit/tb_camus_pkg.vhd tests/unit/tb_axi_pkg.vhd
      tests/unit/compute-engine/tb_loop_nest.vhd tests/unit/compute-engine/tb_addr_gen.vhd
      tests/unit/compute-engine/tb_mac_int8.vhd tests/unit/compute-engine/tb_requant.vhd
      tests/unit/interface/tb_axi_lite_regs.vhd tests/unit/interface/tb_sync_fifo.vhd tests/unit/interface/tb_axi_skid.vhd
      tests/unit/interface/tb_axi_mem_model.vhd tests/unit/interface/tb_axi_master_rd.vhd tests/unit/interface/tb_axi_master_wr.vhd
-     tests/integration/tb_conv_core_v1.vhd tests/integration/tb_conv_engine_v1.vhd tests/integration/tb_conv_engine_axi.vhd"
+     tests/integration/tb_conv_core_v1.vhd tests/integration/tb_conv_engine_v1.vhd tests/integration/tb_conv_engine_axi.vhd
+     tests/integration/tb_conv_accel_top.vhd"
 ghdl -a --std=08 --workdir="$W" $SRC > "$W/logs/analysis.log" 2>&1 || { echo "ANALYSIS FAILED, see $W/logs/analysis.log"; exit 1; }
 
 TBS="tb_camus_pkg tb_axi_pkg tb_loop_nest tb_addr_gen tb_mac_int8 tb_requant tb_axi_lite_regs tb_sync_fifo tb_axi_skid
-     tb_axi_mem_model tb_axi_master_rd tb_axi_master_wr tb_conv_core_v1 tb_conv_engine_v1 tb_conv_engine_axi"
+     tb_axi_mem_model tb_axi_master_rd tb_axi_master_wr tb_conv_core_v1 tb_conv_engine_v1 tb_conv_engine_axi tb_conv_accel_top"
 for t in $TBS; do
     (cd "$W" && ghdl -e --std=08 --workdir="$W" "$t") > "$W/logs/elab_$t.log" 2>&1 || { echo "ELABORATION FAILED: $t"; exit 1; }
 done
@@ -104,6 +106,14 @@ run tb_conv_engine_axi -gG_LAYER=tiny_b -gG_ERR=1
 run tb_conv_engine_axi -gG_LAYER=tiny_b -gG_ERR=2
 run tb_conv_engine_axi -gG_LAYER=tiny_a -gG_READY_PCT=100 -gG_RD_LAT_MAX=0 -gG_WR_LAT_MAX=0
 if [ $GOLDEN -eq 1 ]; then run tb_conv_engine_axi -gG_LAYER=b3sc -gG_FRAME=f000; fi
+
+# top level (task 2.3): the same layers driven through the AXI-Lite registers of conv_accel_top
+for l in tiny_a tiny_b tiny_c tiny_d tiny_e; do run tb_conv_accel_top -gG_LAYER=$l; done
+run tb_conv_accel_top -gG_LAYER=tiny_e -gG_WR_LAT_MAX=20 -gG_FIFO=4
+run tb_conv_accel_top -gG_LAYER=tiny_b -gG_ERR=1
+run tb_conv_accel_top -gG_LAYER=tiny_b -gG_ERR=2
+run tb_conv_accel_top -gG_LAYER=tiny_a -gG_READY_PCT=100 -gG_RD_LAT_MAX=0 -gG_WR_LAT_MAX=0
+if [ $GOLDEN -eq 1 ]; then run tb_conv_accel_top -gG_LAYER=b3sc -gG_FRAME=f000; fi
 
 echo "board $BOARD_ID: $((N - FAILS)) of $N runs passed"
 [ $FAILS -eq 0 ]

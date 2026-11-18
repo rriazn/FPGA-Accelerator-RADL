@@ -89,7 +89,7 @@ Each step is a complete loop: implement, simulate against golden, synthesize (re
 
 | ID | Area | Task | Needs | Output |
 |---|---|---|---|---|
-| 4.0 | Core, Sys | Bring v1 onto the board: synthesize, run on the block design, check bit-exactness, measure latency and energy. First hardware data point. | 2.3, 3.2, 3.3, 3.5 | v1 row in the results table |
+| 4.0 | Core, Sys | Bring v1 onto the board: synthesize, run on the block design, check bit-exactness, measure latency and energy. First hardware data point. **First data point 2026-11-18 (ZedBoard, v1 at 10 MHz, 0x1000000 B of DDR as DMA range):** `accel_probe` passes, all nine golden layers bit-exact, `camus_accel` bit-exact on 2 frames (0 of 2 differ); per frame 1,764,192,598 accelerator clocks (47.2 per MAC at 37.38 M MACs), 176.5 s wall time per frame, of which about 0.12 s are the ARM steps. Energy not measured yet. | 2.3, 3.2, 3.3, 3.5 | v1 row in the results table |
 | 4.1 | Core | BRAM buffering: all weights resident in BRAM (loaded once per layer via the BRAM init `.mem` or a load path), input line buffers, so fewer DDR accesses. | 4.0 | v2 |
 | 4.2 | Core | Unroll the 3x3 window: 9 MACs plus adder tree. | 4.1 | v3 |
 | 4.3 | Core | Unroll 16 output channels: 144 MACs, output-parallel PE array with one accumulator per output channel (output stationary). | 4.2 | v4 |

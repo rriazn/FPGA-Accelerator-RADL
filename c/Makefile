@@ -44,6 +44,26 @@ armhf/camus_accel armhf/accel_probe armhf/accel_golden: armhf/%: %.c $(ACCEL_SRC
 	mkdir -p armhf
 	$(CROSS)gcc $(CFLAGS) $(ACCEL_FLAGS) -O2 -static -o $@ $< $(ACCEL_SRC)
 
+# transfer package of the accelerator programs for the ZedBoard: armhf binaries, the export and golden frame f000,
+# unpacks to c/ and build/export/ (the older package target has the naive baseline and leaves the golden files out)
+package-accel: cross-accel
+	tar czf ../build/board-accel.tar.gz --exclude=build/export/golden/f016 -C .. c/Makefile c/armhf/camus_accel c/armhf/accel_probe c/armhf/accel_golden c/accel.c c/accel.h c/accel_regs.h c/accel_sim.c c/accel_sim.h c/board_platform.c c/board_platform.h c/platform_cli.c c/platform_cli.h c/accel_probe.c c/accel_golden.c c/camus_accel.c build/export
+
+# static aarch64 builds of the same programs for the Ultra96 (Cortex-A53), needs aarch64-linux-gnu-gcc (not in the
+# radl-tf1 image: apt-get install gcc-aarch64-linux-gnu); output in aarch64/
+CROSS64 ?= aarch64-linux-gnu-
+
+cross-accel64: aarch64/camus_accel aarch64/accel_probe aarch64/accel_golden
+
+aarch64/camus_accel aarch64/accel_probe aarch64/accel_golden: aarch64/%: %.c $(ACCEL_SRC) $(ACCEL_HDR)
+	mkdir -p aarch64
+	$(CROSS64)gcc $(CFLAGS) $(ACCEL_FLAGS) -O2 -static -o $@ $< $(ACCEL_SRC)
+
+# transfer package of the accelerator programs for the Ultra96: aarch64 binaries, the export and golden frame f000,
+# unpacks to c/ and build/export/
+package64: cross-accel64
+	tar czf ../build/board64.tar.gz --exclude=build/export/golden/f016 -C .. c/Makefile c/aarch64 c/accel.c c/accel.h c/accel_regs.h c/accel_sim.c c/accel_sim.h c/board_platform.c c/board_platform.h c/platform_cli.c c/platform_cli.h c/accel_probe.c c/accel_golden.c c/camus_accel.c build/export
+
 # static ARMv7 binaries for the ZedBoard Cortex-A9, fallback if the board has no gcc
 cross: armhf/camus_naive_O0 armhf/camus_naive_O2
 
@@ -56,4 +76,4 @@ package: cross
 	tar czf ../build/board.tar.gz --exclude=build/export/golden -C .. c/Makefile c/camus_naive.c c/board_run.sh c/armhf build/export
 
 clean:
-	rm -rf camus_naive_O0 camus_naive_O2 camus_accel accel_probe accel_golden armhf
+	rm -rf camus_naive_O0 camus_naive_O2 camus_accel accel_probe accel_golden armhf aarch64

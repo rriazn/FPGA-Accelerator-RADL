@@ -99,6 +99,19 @@ cd /tmp; wget http://192.168.1.1:8000/board.tar.gz; tar xzf board.tar.gz; cd c; 
 ```
 `/tmp` is in RAM, so repeat this after every reset.
 
+## Step 4a: Run the accelerator programs (not tried yet)
+Written 2026-11-18 from the plan in `docs/plans/vivado-block-design.md` section 6, none of it has been run on the board. For the accelerator the board needs three changes to the steps above:
+- In Step 3, reserve memory by adding `mem=496M` to the boot arguments, **and** tell U-Boot not to move the ramdisk and device tree to the top of RAM (worked on 2026-11-18):
+  ```sh
+  setenv initrd_high 0xffffffff
+  setenv fdt_high 0xffffffff
+  setenv bootargs console=ttyPS0,115200 rdinit=/bin/sh init=/bin/sh mem=496M
+  boot
+  ```
+  Without the first two lines the boot ends in `Kernel panic - not syncing: VFS: Unable to mount root fs` (`Please append a correct "root=" boot option`): U-Boot relocates the ramdisk to just below 512 MB, which is above the 496 MB the kernel is allowed to use with `mem=496M`, so the kernel drops it (likely cause, the kernel's `initrd extends beyond end of memory` line was not looked at). The programs then use `--mem 0x1F000000:0x1000000`. **Check that it took effect before using that range:** `cat /proc/cmdline` must contain `mem=496M` and `grep MemTotal /proc/meminfo` must be below 507904 kB (a full 512 MB board shows about 513000 kB, seen on 2026-11-18 when the line was typed without `mem=`). The root file system and `/tmp` are in RAM, so memory the kernel still owns can hold your files, and the accelerator writing there would corrupt them.
+- In Step 4 (PC): build the package with `make package-accel` in `c/` (Docker) and copy `board-accel.tar.gz` and the bitstream (`.bit.bin`) the same way as `board.tar.gz`, from the same `build/` folder.
+- On the board, after copying: load the bitstream, check the PL clock, then run `accel_probe` first. The commands and what to check are in section 6 of the Vivado checklist.
+
 ## Step 5: Stop the board
 Linux runs from RAM, so the board can be switched off once the SD card is safe.
 

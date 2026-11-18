@@ -135,11 +135,13 @@ cd c
 make run-accel        # builds accel_probe and camus_accel and runs both on the stand-in
 ./camus_accel ../build/export 10      # first 10 test frames only
 # on the board, as root:
-./accel_probe --regs 0x43C00000 --mem 0x1F000000:0x1000000       # bring-up test, run this first
-./camus_accel ../build/export --regs 0x43C00000 --mem 0x1F000000:0x1000000
+./accel_probe --regs 0x40000000 --mem 0x1F000000:0x1000000       # bring-up test, run this first
+./camus_accel ../build/export 2 --regs 0x40000000 --mem 0x1F000000:0x1000000
 ```
 
-Static ARMv7 binaries for the board: `make cross-accel` (in the Docker image, like `make cross`) writes `c/armhf/camus_accel` and `c/armhf/accel_probe`; `make package` takes everything in `c/armhf/`.
+The numbers are for the ZedBoard (the board in the lab): `--regs` is the base address of `s_axi` from the Address Editor (`0x4000_0000` in the block design of 2026-11-18, other block designs may differ), and the DMA range is the top 16 MB of the 512 MB DDR, which needs `mem=496M` in the U-Boot boot arguments. For the Ultra96 block design the Address Editor showed `s_axi` at `0x8000_0000` and `HP0_DDR_LOW` at `0x0000_0000` (2026-11-18), so `--regs 0x80000000 --mem 0x7F000000:0x1000000` (top 16 MB of 2 GB).
+
+Static ARMv7 binaries (32-bit, for the ZedBoard): `make cross-accel` (in the Docker image, like `make cross`) writes `c/armhf/camus_accel`, `accel_probe` and `accel_golden`; `make package-accel` writes `build/board-accel.tar.gz` with those three, the sources, `build/export` and the golden frame `f000` (built 2026-11-18, the programs run bit-exact against the stand-in under `qemu-arm`; the older `make package` is the naive baseline and leaves the golden files out). **The Ultra96 needs 64-bit (aarch64) binaries**, the armhf ones will most likely not run there. `make cross-accel64` builds static aarch64 binaries into `c/aarch64/`, and `make package64` writes `build/board64.tar.gz` (3.5 MB: the binaries and sources, `build/export` and the golden frame `f000`, unpacks to `c/` and `build/export/`). The `radl-tf1` image has no aarch64 compiler; install it in the container first (`apt-get update && apt-get install -y gcc-aarch64-linux-gnu`), or build on the board with `make accel_probe accel_golden camus_accel`. The aarch64 build is warning free, and the binaries run bit-exact with the stand-in under `qemu-aarch64` (probe, golden layers, `camus_accel`); the board backend itself cannot be tried that way. `board_platform.c` uses only 32-bit physical addresses, which covers the Ultra96's 2 GB DDR and the PS master windows.
 
 `--regs` is the physical base address of the AXI-Lite slave (Vivado address editor), `--mem` is a range of DDR reserved for the DMA buffers as `<address>:<size>` (hex or decimal). Both are parameters because they come from the block design and the boot setup (open, D4); the addresses above are examples. About 1 MB is enough. The reserved range must be invisible to Linux (kernel `mem=` argument or a reserved-memory node in the device tree), page aligned, and below 4 GB.
 

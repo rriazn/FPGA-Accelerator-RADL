@@ -9,6 +9,7 @@ c/camus_accel
 c/accel_probe
 c/accel_golden
 c/armhf/
+c/aarch64/
 *.exe
 *.o
 

@@ -8,7 +8,7 @@ package camus_pkg is
     -- ZEDBOARD: 64-bit HP port, a 16 channel int8 pixel is 2 beats; ULTRA96: 128-bit HP port, a pixel is 1 beat
     -- BOARD stays ULTRA96 (the old fixed 128) until the switch of the default to ZEDBOARD is agreed
     type board_t is (ZEDBOARD, ULTRA96);
-    constant BOARD : board_t := ULTRA96;
+    constant BOARD : board_t := ZEDBOARD;
     type board_nat_t is array (board_t) of natural;
     constant AXI_DATA_W_BY_BOARD : board_nat_t := (ZEDBOARD => 64, ULTRA96 => 128);
 

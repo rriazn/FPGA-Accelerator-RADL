@@ -24,7 +24,9 @@ architecture sim of tb_loop_nest is
         in_lanes => 16, out_lanes => 16,
         in_base => (others => '0'), w_base => (others => '0'),
         b_base => (others => '0'), out_base => (others => '0'));
+    signal s_oh, s_ow  : natural := 1;
     signal s_k, s_oy, s_ox, s_c, s_fy, s_fx : natural;
+    signal s_at_max : std_logic_vector(5 downto 0);
     signal s_first, s_last, s_last_out, s_running : std_logic;
     signal s_done  : boolean := false;
 begin
@@ -42,8 +44,10 @@ begin
 
     dut : entity work.loop_nest
         port map (
-            i_clk => s_clk, i_rst => s_rst, i_cfg => s_cfg, i_start => s_start, i_step => s_step,
+            i_clk => s_clk, i_rst => s_rst, i_cfg => s_cfg, i_oh => s_oh, i_ow => s_ow,
+            i_start => s_start, i_step => s_step,
             o_k => s_k, o_oy => s_oy, o_ox => s_ox, o_c => s_c, o_fy => s_fy, o_fx => s_fx,
+            o_at_max => s_at_max,
             o_first_mac => s_first, o_last_mac => s_last, o_last_output => s_last_out,
             o_running => s_running
         );
@@ -96,7 +100,14 @@ begin
             -- compare the current outputs with the model term
             procedure check_term(k, oy, ox, c, fy, fx : natural) is
                 variable e_first, e_last, e_lastout : std_logic;
+                variable e_at_max : std_logic_vector(5 downto 0);
             begin
+                e_at_max(0) := '1' when fx = p_fx - 1 else '0';
+                e_at_max(1) := '1' when fy = p_fy - 1 else '0';
+                e_at_max(2) := '1' when c = p_c - 1 else '0';
+                e_at_max(3) := '1' when ox = ow - 1 else '0';
+                e_at_max(4) := '1' when oy = oh - 1 else '0';
+                e_at_max(5) := '1' when k = p_k - 1 else '0';
                 e_first := '1' when (c = 0 and fy = 0 and fx = 0) else '0';
                 e_last := '1' when (c = p_c - 1 and fy = p_fy - 1 and fx = p_fx - 1) else '0';
                 e_lastout := '1' when (e_last = '1' and ox = ow - 1 and oy = oh - 1 and k = p_k - 1) else '0';
@@ -113,6 +124,10 @@ begin
                     fail("flag mismatch at k/oy/ox/c/fy/fx " & integer'image(k) & "/" & integer'image(oy)
                          & "/" & integer'image(ox) & "/" & integer'image(c) & "/" & integer'image(fy) & "/"
                          & integer'image(fx));
+                elsif s_at_max /= e_at_max then
+                    fail("at_max mismatch at k/oy/ox/c/fy/fx " & integer'image(k) & "/" & integer'image(oy)
+                         & "/" & integer'image(ox) & "/" & integer'image(c) & "/" & integer'image(fy) & "/"
+                         & integer'image(fx));
                 end if;
             end procedure check_term;
         begin
@@ -124,11 +139,15 @@ begin
             s_cfg.fx <= p_fx;
             s_cfg.stride <= p_stride;
             s_cfg.pad <= p_pad;
+            s_oh <= oh;
+            s_ow <= ow;
             s_step <= '0';
             s_start <= '1';
             tick;
             s_start <= '0';
-            -- the shape is latched at start, changing i_cfg now must not matter
+            -- the shape is latched at start, changing i_cfg, i_oh and i_ow now must not matter
+            s_oh <= 1;
+            s_ow <= 1;
             s_cfg.k <= 1;
             s_cfg.c <= 1;
             s_cfg.h <= 1;
@@ -220,7 +239,7 @@ begin
 
         -- reset in the middle of a layer, then a new layer must run cleanly
         s_cfg.k <= 2; s_cfg.c <= 2; s_cfg.h <= 4; s_cfg.w <= 4; s_cfg.fy <= 3; s_cfg.fx <= 3;
-        s_cfg.stride <= 1; s_cfg.pad <= 1;
+        s_cfg.stride <= 1; s_cfg.pad <= 1; s_oh <= 4; s_ow <= 4;
         s_start <= '1';
         tick;
         s_start <= '0';

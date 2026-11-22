@@ -13,7 +13,7 @@
 -- first weight beat, G_ERR = 2: SLVERR on the first result beat, which the model then does not write), second run
 -- the data width is camus_pkg.AXI_DATA_W, so BOARD selects 64 (ZEDBOARD) or 128 (ULTRA96)
 -- run from vhdl/ (GHDL, VHDL-2008, the LLVM/GCC backend needs -e):
---   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/axi_pkg.vhd src/compute-engine/{loop_nest,addr_gen,mac_int8,conv_core_v1,conv_engine_v1}.vhd \
+--   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/axi_pkg.vhd src/compute-engine/{layer_setup,loop_nest,addr_gen,mac_int8,conv_core_v1,conv_engine_v1}.vhd \
 --        src/interface/{sync_fifo,axi_skid,axi_master_rd,axi_master_wr,axi_ddr_master}.vhd tests/models/axi_mem_model_pkg.vhd tests/models/axi_mem_model_shared.vhd \
 --        tests/models/axi_mem_model.vhd \
 --        tests/integration/tb_conv_engine_axi.vhd

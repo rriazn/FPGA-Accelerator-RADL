@@ -10,12 +10,16 @@ entity loop_nest is
     port (
         i_clk, i_rst : in std_logic;
         i_cfg : in layer_cfg_t;
+        i_oh, i_ow : in natural;    -- output height and width from layer_setup, latched at start
         i_start : in std_logic; -- begin layer
         i_step : in std_logic;  -- advance to the next iteration
-        o_k, o_oy, o_ox, o_c, o_fy, o_fx : out natural;   -- current indices 
+        o_k, o_oy, o_ox, o_c, o_fy, o_fx : out natural;   -- current indices
         -- k: output channel, oy/ox: row/col of output pixel, c: input channel, fy/fx: row/col of kernel winfdow
-        o_first_mac, o_last_mac : out std_logic;    -- first / last iteration of the current output element
-        o_last_output : out std_logic;    -- last output element of the layer
+        -- index at its last value, bits 0 fx, 1 fy, 2 c, 3 ox, 4 oy, 5 k
+        -- the lowest 0 bit is the loop that advances on the next step, addr_gen follows it
+        o_at_max : out std_logic_vector(5 downto 0);
+        o_first_mac, o_last_mac : out std_logic; -- first / last iteration of the current output element
+        o_last_output : out std_logic;  -- last output element of the layer
         o_running : out std_logic
     );
 end entity loop_nest;
@@ -44,8 +48,8 @@ begin
                     s_fy <= 0;
                     s_fx <= 0;
                     s_k_max <= i_cfg.k - 1;
-                    s_oy_max <= out_dim(i_cfg.h, i_cfg.fy, i_cfg.stride, i_cfg.pad) - 1;
-                    s_ox_max <= out_dim(i_cfg.w, i_cfg.fx, i_cfg.stride, i_cfg.pad) - 1;
+                    s_oy_max <= i_oh - 1;
+                    s_ox_max <= i_ow - 1;
                     s_c_max <= i_cfg.c - 1;
                     s_fy_max <= i_cfg.fy - 1;
                     s_fx_max <= i_cfg.fx - 1;
@@ -90,6 +94,13 @@ begin
     s_last_mac <= '1' when s_c = s_c_max and s_fy = s_fy_max and s_fx = s_fx_max else '0';
     s_last_output <= '1' when s_last_mac = '1' and s_ox = s_ox_max and s_oy = s_oy_max and s_k = s_k_max else '0';
 
+
+    o_at_max(0) <= '1' when s_fx = s_fx_max else '0';
+    o_at_max(1) <= '1' when s_fy = s_fy_max else '0';
+    o_at_max(2) <= '1' when s_c = s_c_max else '0';
+    o_at_max(3) <= '1' when s_ox = s_ox_max else '0';
+    o_at_max(4) <= '1' when s_oy = s_oy_max else '0';
+    o_at_max(5) <= '1' when s_k = s_k_max else '0';
 
     o_k <= s_k;
     o_oy <= s_oy;

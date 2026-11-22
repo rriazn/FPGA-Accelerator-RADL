@@ -2,6 +2,7 @@
 -- v1 convolution core: one MAC per clock, plain synchronous memory ports
 -- computes acc = bias + sum(x * w) per output element and writes it as int32
 -- conv_engine_v1 later wraps this core with the AXI master
+-- a layer starts with layer_setup (about max(oh, ow) + 6 clocks, no terms), i_cfg is latched at start
 -- i_ce freezes the whole core, the read ports behave like a BRAM with an enable:
 --   i_ce = 1: the address is sampled and the data shows up in the next cycle
 --   i_ce = 0: nothing moves, the data inputs must keep the value of the last i_ce = 1 cycle
@@ -36,6 +37,13 @@ entity conv_core_v1 is
 end entity conv_core_v1;
 
 architecture rtl of conv_core_v1 is
+    -- setup: layer_setup latches the config and computes the address steps, then loop_nest starts
+    signal s_setup_start, s_setup_done : std_logic;
+    signal s_cfg : layer_cfg_t;
+    signal s_const : addr_const_t;
+    signal s_at_max : std_logic_vector(5 downto 0);
+    signal s_addr_step : std_logic;
+
     -- stage 0: loop_nest and addr_gen, the memories sample the addresses at the clock edge
     signal s_k, s_oy, s_ox, s_c, s_fy, s_fx : natural;
     signal s_first, s_last, s_last_out, s_running : std_logic;
@@ -58,17 +66,33 @@ architecture rtl of conv_core_v1 is
     signal s_cycles : unsigned(31 downto 0) := (others => '0');
 begin
 
+    -- a start while busy is ignored, it would restart the setup under a running layer
+    s_setup_start <= i_start and not s_busy;
+
+    -- the setup does not touch the memories, so it ignores i_ce
+    u_setup : entity work.layer_setup
+        port map (
+            i_clk => i_clk, i_rst => i_rst, i_cfg => i_cfg, i_start => s_setup_start,
+            o_busy => open, o_done => s_setup_done, o_cfg => s_cfg, o_const => s_const
+        );
+
     u_loop : entity work.loop_nest
         port map (
-            i_clk => i_clk, i_rst => i_rst, i_cfg => i_cfg, i_start => i_start, i_step => i_ce,
+            i_clk => i_clk, i_rst => i_rst, i_cfg => s_cfg, i_oh => s_const.oh, i_ow => s_const.ow,
+            i_start => s_setup_done, i_step => i_ce,
             o_k => s_k, o_oy => s_oy, o_ox => s_ox, o_c => s_c, o_fy => s_fy, o_fx => s_fx,
+            o_at_max => s_at_max,
             o_first_mac => s_first, o_last_mac => s_last, o_last_output => s_last_out,
             o_running => s_running
         );
 
+    -- loop_nest only steps while running, addr_gen must do the same
+    s_addr_step <= i_ce and s_running;
+
     u_addr : entity work.addr_gen
         port map (
-            i_cfg => i_cfg, i_k => s_k, i_oy => s_oy, i_ox => s_ox, i_c => s_c, i_fy => s_fy, i_fx => s_fx,
+            i_clk => i_clk, i_rst => i_rst, i_cfg => s_cfg, i_const => s_const,
+            i_start => s_setup_done, i_step => s_addr_step, i_at_max => s_at_max,
             o_x_addr => s_x_addr, o_x_valid => s_x_valid, o_w_addr => s_w_addr,
             o_b_addr => s_b_addr, o_out_addr => s_out_addr
         );

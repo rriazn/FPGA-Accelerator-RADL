@@ -21,8 +21,9 @@ Companion to `architecture-spec.md` (behavior, layout, registers), `architecture
 |---|---|---|---|---|
 | `camus_pkg` | `camus_pkg.vhd` | all | 0.3 | Core, Sys |
 | `axi_lite_regs` | `../interface/axi_lite_regs.vhd` | v1, target | 1.4 | Sys |
+| `layer_setup` | `layer_setup.vhd` | v1, target | 1.3 | Core |
 | `loop_nest` | `loop_nest.vhd` | v1 | 1.3 | Core |
-| `addr_gen` | `addrgen.vhd` | v1, target | 1.3 | Core |
+| `addr_gen` | `addr_gen.vhd` | v1, target | 1.3 | Core |
 | `axi_master_rd` | `../interface/axi_master_rd.vhd` | v1, target | 2.3 | Core, Sys |
 | `axi_master_wr` | `../interface/axi_master_wr.vhd` | v1, target | 2.3 | Core, Sys |
 | `axi_ddr_master` (both masters, one `m_axi` bundle) | `../interface/axi_ddr_master.vhd` | v1, target | 2.3 | Sys |
@@ -136,9 +137,11 @@ entity loop_nest is
   port (
     i_clk, i_rst : in std_logic;
     i_cfg       : in layer_cfg_t;
+    i_oh, i_ow  : in natural;                    -- output size from layer_setup
     i_start     : in std_logic;
     i_step      : in std_logic;                  -- advance to the next iteration
     o_k, o_oy, o_ox, o_c, o_fy, o_fx : out natural;   -- current indices, innermost loop is fx
+    o_at_max    : out std_logic_vector(5 downto 0);   -- index at its last value: 0 fx, 1 fy, 2 c, 3 ox, 4 oy, 5 k
     o_first_mac, o_last_mac  : out std_logic;    -- first / last iteration of the current output element
     o_last_output            : out std_logic;    -- last output element of the layer
     o_running                : out std_logic
@@ -148,17 +151,41 @@ end entity;
 
 Order for v1: `k, oy, ox, c, fy, fx` (output element outermost, so the accumulator completes before the next). The target design replaces this with `layer_sequencer`.
 
-Behavior (implemented in `loop_nest.vhd`, tested by `tb_loop_nest.vhd`): `i_start` is ignored while running. The loop limits (`OH`, `OW` from `out_dim`, and `k`, `c`, `fy`, `fx`) are latched at start, so `i_cfg` may change during the run. The outputs show the term that has not been accepted yet; with `i_step = 1` the nest advances at the next clock edge, with `i_step = 0` it waits. `o_first_mac`, `o_last_mac` and `o_last_output` are 0 while `o_running = 0`. The config must be valid (all sizes at least 1, `h + 2*pad >= fy`), otherwise the natural subtraction fails.
+Behavior (implemented in `loop_nest.vhd`, tested by `tb_loop_nest.vhd`): `i_start` is ignored while running. The loop limits (`OH`, `OW` from `i_oh`/`i_ow`, and `k`, `c`, `fy`, `fx`) are latched at start, so the inputs may change during the run. `loop_nest` does not divide: `OH` and `OW` come from `layer_setup` (changed 2026-11-20, [addr-gen-rewrite.md](addr-gen-rewrite.md)). `o_at_max` shows which indices are at their last value; the lowest 0 bit is the loop that advances on the next step, and `addr_gen` follows it. The outputs show the term that has not been accepted yet; with `i_step = 1` the nest advances at the next clock edge, with `i_step = 0` it waits. `o_first_mac`, `o_last_mac` and `o_last_output` are 0 while `o_running = 0`. The config must be valid (all sizes at least 1, `h + 2*pad >= fy`), otherwise the natural subtraction fails.
+
+### `layer_setup` (task 1.3)
+
+Per-layer setup at the start of a layer (`layer_setup.vhd`, added 2026-11-20, see [addr-gen-rewrite.md](addr-gen-rewrite.md)). Latches `i_cfg`, computes `OH` and `OW` by repeated subtraction, then the step constants of `addr_gen` (`addr_const_t` in `camus_pkg`), one registered multiplication per clock.
+
+```vhdl
+entity layer_setup is
+  port (
+    i_clk, i_rst : in std_logic;
+    i_cfg   : in layer_cfg_t;
+    i_start : in std_logic;      -- ignored while busy
+    o_busy  : out std_logic;
+    o_done  : out std_logic;     -- one clock, o_cfg and o_const hold until the next start
+    o_cfg   : out layer_cfg_t;   -- i_cfg as latched at start
+    o_const : out addr_const_t   -- oh, ow and the address steps
+  );
+end entity;
+```
+
+`o_done` comes `max(OH, OW) + 4` clocks after the edge that takes `i_start` (at most 60 for ResNet-8). The config must be valid (all sizes at least 1, `h + 2*pad >= fy`, `w + 2*pad >= fx`). The unit testbench is `vhdl/tests/unit/compute-engine/tb_layer_setup.vhd`: the ResNet-8 shapes, corner cases and 500 random configs (lanes 1 to 16, strides and pad up to 7, random bases), the exact setup length, the latched config, a start while busy and a reset in the middle.
 
 ### `addr_gen` (task 1.3)
 
-Combinational (or one pipeline stage) address calculation from loop indices. Implements the layout formula with L, symmetric zero padding and stride.
+Address generation with running pointers (rewritten 2026-11-20, [addr-gen-rewrite.md](addr-gen-rewrite.md); the first version computed every address from the indices in one clock and limited v1 to 10 MHz). Each step adds a per-layer constant from `layer_setup` to the pointer of the loop that advances, and the pointers of the inner loops take the same value. No division and no multiplication per clock. Implements the layout formula with any L from 1 to 16, symmetric zero padding and stride.
 
 ```vhdl
 entity addr_gen is
   port (
-    i_cfg        : in layer_cfg_t;
-    i_k, i_oy, i_ox, i_c, i_fy, i_fx : in natural;
+    i_clk, i_rst : in std_logic;
+    i_cfg        : in layer_cfg_t;                         -- latched config from layer_setup
+    i_const      : in addr_const_t;                        -- steps from layer_setup
+    i_start      : in std_logic;                           -- the i_start of loop_nest, only while it is idle
+    i_step       : in std_logic;                           -- the i_step of loop_nest, only while it runs
+    i_at_max     : in std_logic_vector(5 downto 0);        -- o_at_max of loop_nest
     o_x_addr     : out unsigned(AXI_ADDR_W-1 downto 0);   -- byte address of x[c][iy][ix]
     o_x_valid    : out std_logic;                          -- 0 if (iy, ix) is outside the input: use 0, no read
     o_w_addr     : out unsigned(AXI_ADDR_W-1 downto 0);   -- byte address of w[k][c][fy][fx]
@@ -168,7 +195,7 @@ entity addr_gen is
 end entity;
 ```
 
-Where `iy = oy*stride - pad + fy`, `ix = ox*stride - pad + fx`. Implemented as a purely combinational process (no clock). When `o_x_valid = 0` (padding) `o_x_addr` is `in_base` and must not be used; the layout function is only evaluated for valid pixels, since it takes natural arguments. Weights are the plain `[K][C][FY][FX]` array and the bias and output are int32 (4 bytes). The unit testbench is `vhdl/tests/unit/compute-engine/tb_addr_gen.vhd`. Test: exhaustive comparison with a Python or C model of the same formulas for ResNet-8 shapes plus the random layers from task 0.5.
+The pointers are registers that move on the same edges as `loop_nest`, so the outputs belong to the term `loop_nest` shows and `conv_core_v1` keeps its pipeline. Padding is found from running `iy = oy*stride - pad + fy` and `ix` (compares only). When `o_x_valid = 0` (padding) `o_x_addr` is not meaningful and must not be used. Weights are the plain `[K][C][FY][FX]` array and the bias and output are int32 (4 bytes). The unit testbench `vhdl/tests/unit/compute-engine/tb_addr_gen.vhd` drives the real `layer_setup` and `loop_nest` and compares every term, stalled cycles included, with the old formulas (`elem_addr`, `out_dim`): the stem and the two shortcut layers in full, reduced versions of the other layers with partial channel blocks, 400 random layers (lanes 1 to 16, strides up to 4, random bases, `in_base = 0` so the start pointer wraps), hand computed offsets, every output slot written once, and a reset in the middle of a layer.
 
 ### `axi_master_rd` and `axi_master_wr` (task 2.3)
 
@@ -238,7 +265,7 @@ Latency is one clock: `o_acc` and `o_acc_valid` change on the edge that consumes
 
 ### `conv_core_v1` (task 2.1, first part)
 
-The engine core with plain synchronous memory ports instead of AXI: `loop_nest`, `addr_gen` and `mac_int8` wired together (`conv_core_v1.vhd`). The memories sample the addresses at a clock edge and return the data in the next cycle. The flags of each term (`first`, `last`, padding, last output, output address) travel through the same pipeline stages as its data, so they reach the MAC together with it. The result appears two cycles after the last term (cycles = MACs + 2) and is written as int32 together with its address. `o_x_rd` is 0 for padding positions, where the input must not be read and the MAC gets 0; the testbench memory returns poison data in that case. `o_b_rd` is 1 only on the first term of an output element, the one term where the MAC uses the bias, so the wrapper reads the bias once per output element (the testbench returns poison otherwise). **Stalling (proposal, to be agreed with the system owner):** `i_ce` is a clock enable for the whole core. With `i_ce = 0` nothing moves (loop counters, pipeline stages and MAC all hold), so the wrapper can wait for slow memory. The read ports behave like a BRAM with an enable: with `i_ce = 1` the address is sampled and the data appears in the next cycle; with `i_ce = 0` the data inputs must keep the value of the last enabled cycle. For a slow memory the wrapper fetches the data for the addresses on the ports (they are stable while `i_ce = 0`), latches it, then raises `i_ce` for one cycle. `o_term_valid` says the addresses belong to a real term; it is 0 while idle and during the two flush cycles after the last term, where the wrapper can keep `i_ce = 1`. `o_out_we` is a one-cycle strobe that cannot be stalled, at most one per enabled cycle, so the write side needs a small FIFO and drops `i_ce` before it is full. `o_cycles` counts all clocks while busy, stalled ones included. The testbench stalls randomly (`G_STALL`, `G_MAX_STALL`) and the results stay bit-exact.
+The engine core with plain synchronous memory ports instead of AXI: `loop_nest`, `addr_gen` and `mac_int8` wired together (`conv_core_v1.vhd`). The memories sample the addresses at a clock edge and return the data in the next cycle. The flags of each term (`first`, `last`, padding, last output, output address) travel through the same pipeline stages as its data, so they reach the MAC together with it. A layer starts with `layer_setup` (`max(OH, OW) + 5` clocks without terms, `i_cfg` is latched at start), then the result appears two cycles after the last term (cycles = setup + MACs + 2) and is written as int32 together with its address. `o_x_rd` is 0 for padding positions, where the input must not be read and the MAC gets 0; the testbench memory returns poison data in that case. `o_b_rd` is 1 only on the first term of an output element, the one term where the MAC uses the bias, so the wrapper reads the bias once per output element (the testbench returns poison otherwise). **Stalling (proposal, to be agreed with the system owner):** `i_ce` is a clock enable for the whole core. With `i_ce = 0` nothing moves (loop counters, pipeline stages and MAC all hold), so the wrapper can wait for slow memory. The read ports behave like a BRAM with an enable: with `i_ce = 1` the address is sampled and the data appears in the next cycle; with `i_ce = 0` the data inputs must keep the value of the last enabled cycle. For a slow memory the wrapper fetches the data for the addresses on the ports (they are stable while `i_ce = 0`), latches it, then raises `i_ce` for one cycle. `o_term_valid` says the addresses belong to a real term; it is 0 while idle and during the two flush cycles after the last term, where the wrapper can keep `i_ce = 1`. `o_out_we` is a one-cycle strobe that cannot be stalled, at most one per enabled cycle, so the write side needs a small FIFO and drops `i_ce` before it is full. `o_cycles` counts all clocks while busy, stalled ones included. The testbench stalls randomly (`G_STALL`, `G_MAX_STALL`) and the results stay bit-exact.
 
 `conv_engine_v1` below wraps this core with the AXI master. The integration test is `vhdl/tests/integration/tb_conv_core_v1.vhd`, which runs a layer from the golden vectors and compares every accumulator.
 
@@ -496,10 +523,10 @@ The width of `o_skip_data` depends on open point 6: if the requantized shortcut 
 ## Build order
 
 ```
-camus_pkg ─┬─ loop_nest ─ addr_gen ─┐
-           ├─ axi_lite_regs         ├─ conv_engine_v1 ─ conv_accel_top   (v1, tasks 1.x, 2.x)
-           ├─ axi_master_rd/wr ─────┤
-           └─ mac_int8 ─────────────┘
+camus_pkg ─┬─ layer_setup ─ loop_nest ─ addr_gen ─┐
+           ├─ axi_lite_regs                       ├─ conv_engine_v1 ─ conv_accel_top   (v1, tasks 1.x, 2.x)
+           ├─ axi_master_rd/wr ───────────────────┤
+           └─ mac_int8 ───────────────────────────┘
 
 v1 working ─ weight_store + weight_loader + line_buffer (4.1) ─ window_gen + pe_lane (4.2)
            ─ pe_array + layer_sequencer (4.3) ─ pipelining (4.4)

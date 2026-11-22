@@ -7,7 +7,7 @@
 -- STATUS.error after an injected SLVERR (G_ERR as in tb_conv_engine_axi), done and error sticky until the next start
 -- layers, data and memory map as in tb_conv_engine_axi (golden stem .. b3sc from G_EXPORT, or tiny_a .. tiny_e with random data)
 -- run from vhdl/ (GHDL, VHDL-2008):
---   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/axi_pkg.vhd src/compute-engine/{loop_nest,addr_gen,mac_int8,conv_core_v1,conv_engine_v1}.vhd \
+--   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/axi_pkg.vhd src/compute-engine/{layer_setup,loop_nest,addr_gen,mac_int8,conv_core_v1,conv_engine_v1}.vhd \
 --        src/interface/{axi_lite_regs,sync_fifo,axi_skid,axi_master_rd,axi_master_wr,axi_ddr_master}.vhd src/conv_accel_top.vhd \
 --        tests/models/axi_mem_model_pkg.vhd tests/models/axi_mem_model_shared.vhd tests/models/axi_mem_model.vhd \
 --        tests/integration/tb_conv_accel_top.vhd

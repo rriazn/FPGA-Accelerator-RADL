@@ -32,6 +32,21 @@ package camus_pkg is
         in_base, w_base, b_base, out_base : unsigned(AXI_ADDR_W-1 downto 0);   -- DDR byte addresses of input, weights, bias, output
     end record;
 
+    -- Per-layer constants of the running address pointers, computed by layer_setup at start (byte units)
+    -- the steps are added when the named loop advances, see docs/plans/addr-gen-rewrite.md
+    type addr_const_t is record
+        oh, ow   : natural;                              -- output height and width
+        x_org    : unsigned(AXI_ADDR_W-1 downto 0);      -- address of x[0][-pad][-pad], may wrap below in_base
+        x_fx     : unsigned(AXI_ADDR_W-1 downto 0);      -- in_lanes
+        x_fy     : unsigned(AXI_ADDR_W-1 downto 0);      -- w * in_lanes
+        x_cblk   : unsigned(AXI_ADDR_W-1 downto 0);      -- h * w * in_lanes - (in_lanes - 1), c enters the next block
+        x_ox     : unsigned(AXI_ADDR_W-1 downto 0);      -- stride * in_lanes
+        x_oy     : unsigned(AXI_ADDR_W-1 downto 0);      -- stride * w * in_lanes
+        w_k      : unsigned(AXI_ADDR_W-1 downto 0);      -- c * fy * fx
+        out_px   : unsigned(AXI_ADDR_W-1 downto 0);      -- 4 * out_lanes, next output pixel
+        out_kblk : unsigned(AXI_ADDR_W-1 downto 0);      -- 4 * (oh * ow * out_lanes - (out_lanes - 1)), k enters the next block
+    end record;
+
     -- Output size of a conv along one axis: (i + 2p - f) / s + 1, i input size, f kernel, s stride, p pad
     function out_dim(i, f, s, p : natural) return natural;
     -- Element index of channel c at (y, x) in an h x w map: (((c / l) * h + y) * w + x) * l + c mod l, l = 16 or 1

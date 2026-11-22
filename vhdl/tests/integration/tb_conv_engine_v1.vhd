@@ -1,4 +1,4 @@
--- integration test: conv_engine_v1 (loop_nest + addr_gen + mac_int8 + conv_core_v1) with a command level DDR model
+-- integration test: conv_engine_v1 (layer_setup + loop_nest + addr_gen + mac_int8 + conv_core_v1) with a command level DDR model
 -- the model stands in for axi_master_rd and axi_master_wr, with random ready delays and response latencies
 -- G_LAYER is a golden layer (stem, b1c1, b1c2, b2c1, b2c2, b2sc, b3c1, b3c2, b3sc) compared with <layer>_acc.mem,
 -- or a small layer with random data and a reference convolution in this file (tiny_a to tiny_e)
@@ -6,7 +6,7 @@
 -- checks: every result word written once with the right bytes, nothing else written, read counts (x only at
 -- non-padding positions, bias once per output element), protocol rules, o_done after the last write, o_error, second run
 -- run from vhdl/ (GHDL, VHDL-2008):
---   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/compute-engine/{loop_nest,addr_gen,mac_int8,conv_core_v1,conv_engine_v1}.vhd tests/integration/tb_conv_engine_v1.vhd
+--   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/compute-engine/{layer_setup,loop_nest,addr_gen,mac_int8,conv_core_v1,conv_engine_v1}.vhd tests/integration/tb_conv_engine_v1.vhd
 --   ghdl -r --std=08 --workdir=<dir> tb_conv_engine_v1 -gG_LAYER=tiny_b
 --   ghdl -r --std=08 --workdir=<dir> tb_conv_engine_v1 -gG_LAYER=b3sc -gG_FRAME=f000 -gG_RUNS=1
 library ieee;

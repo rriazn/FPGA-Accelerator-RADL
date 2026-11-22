@@ -1,8 +1,8 @@
--- integration test: loop_nest + addr_gen + mac_int8 (conv_core_v1) against the hardware golden vectors
+-- integration test: layer_setup + loop_nest + addr_gen + mac_int8 (conv_core_v1) against the hardware golden vectors
 -- the memories are VHDL arrays loaded from build/export, the int32 results are compared with <layer>_acc.mem
 -- run from vhdl/ (GHDL, VHDL-2008), layer is stem, b1c1, b1c2, b2c1, b2c2, b2sc, b3c1, b3c2 or b3sc, frame is f000 or f016
 -- G_STALL is the chance in percent that i_ce drops in a cycle, a stall lasts 1 to G_MAX_STALL cycles (0 = never stall)
---   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/compute-engine/{loop_nest,addr_gen,mac_int8,conv_core_v1}.vhd tests/integration/tb_conv_core_v1.vhd
+--   ghdl -a --std=08 --workdir=<dir> src/camus_pkg.vhd src/compute-engine/{layer_setup,loop_nest,addr_gen,mac_int8,conv_core_v1}.vhd tests/integration/tb_conv_core_v1.vhd
 --   ghdl -r --std=08 --workdir=<dir> tb_conv_core_v1 -gG_LAYER=stem -gG_FRAME=f000 -gG_STALL=30 -gG_MAX_STALL=8
 library ieee;
 use ieee.std_logic_1164.all;
@@ -240,7 +240,8 @@ begin
                & integer'image(C_TERMS) & " MACs";
         if v_errors > 0 or v_writes /= v_n_exp then
             report "FAIL" severity failure;
-        elsif v_ce_cycles < C_TERMS or v_ce_cycles > C_TERMS + 8 then
+        -- terms, flush and the setup at start (max(oh, ow) + 5 clocks without terms)
+        elsif v_ce_cycles < C_TERMS or v_ce_cycles > C_TERMS + 8 + maximum(C_OH, C_OW) + 5 then
             report "FAIL, enabled cycle count out of range" severity failure;
         elsif to_integer(s_cycles) < v_ce_cycles or (G_STALL = 0 and to_integer(s_cycles) /= v_ce_cycles) then
             report "FAIL, o_cycles does not match the clocks while busy" severity failure;

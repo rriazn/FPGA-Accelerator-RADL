@@ -38,7 +38,7 @@ Picture (ZedBoard names):
 
 All sources are VHDL-2008 (the testbenches and the aggregates in `axi_lite_regs` need it).
 
-- [ ] Add the files of `vhdl/src/` in this set, nothing from `vhdl/tests/`: `camus_pkg`, `axi_pkg`, `compute-engine/{loop_nest,addr_gen,mac_int8,conv_core_v1,conv_engine_v1}`, `interface/{axi_lite_regs,sync_fifo,axi_skid,axi_master_rd,axi_master_wr,axi_ddr_master}`, `conv_accel_top`, and **one** wrapper: `conv_accel_bd_zed` for the ZedBoard (`conv_accel_bd` is the Ultra96 one, do not add both). `requant.vhd` is not instantiated by v1, leaving it out is fine.
+- [ ] Add the files of `vhdl/src/` in this set, nothing from `vhdl/tests/`: `camus_pkg`, `axi_pkg`, `compute-engine/{layer_setup,loop_nest,addr_gen,mac_int8,conv_core_v1,conv_engine_v1}`, `interface/{axi_lite_regs,sync_fifo,axi_skid,axi_master_rd,axi_master_wr,axi_ddr_master}`, `conv_accel_top`, and **one** wrapper: `conv_accel_bd_zed` for the ZedBoard (`conv_accel_bd` is the Ultra96 one, do not add both). `requant.vhd` is not instantiated by v1, leaving it out is fine.
 - [ ] Set the file type of the sources to **VHDL 2008** (Tcl: `set_property file_type {VHDL 2008} [get_files *.vhd]`), **except the wrapper** (`conv_accel_bd_zed.vhd`, or `conv_accel_bd.vhd`), which must stay **plain VHDL**. Setting the wrapper to VHDL 2008 made the module reference invalid in Vivado (seen 2026-11-18, fixed by setting the wrapper back to plain VHDL; the other files stay 2008). The only 2008 construct GHDL reported is `process(all)` in `axi_master_rd.vhd`; the files that do not depend on it analyse as VHDL-93 (the ones that depend on it, including the wrapper, could not be checked that way). All go into library `work`.
 - [ ] Elaborate and check there are no errors.
 

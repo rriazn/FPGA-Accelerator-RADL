@@ -30,7 +30,7 @@ Everything between the CPU and the accelerator is outside it.
 |---|---|---|
 | F1 | **Platform switch:** a `BOARD` constant in `camus_pkg`, with `AXI_DATA_W` derived from it | [`vhdl/src/camus_pkg.vhd`](../../vhdl/src/camus_pkg.vhd#L7) (changed; owner's sign-off needed) |
 | F2 | `axi_pkg`: per-board AXI limits; AXI constants; `burst_beats()`, the split rule used inside both masters; `crosses_4k()` for checks; `clog2()` | `vhdl/src/axi_pkg.vhd` (packages go in `vhdl/src/`, [`vhdl-modules.md:18`](vhdl-modules.md#L18)) |
-| F3 | `axi_skid`: register slice, so every handshake signal on `m_axi_*` comes straight from a flip-flop | `vhdl/src/interface/axi_skid.vhd` |
+| F3 | `axi_skid`: two-entry register slice (pipeline skid buffer) for AR, AW and W. Its output register drives the `m_axi_*` valid (R2); its registered ready is for timing only | `vhdl/src/interface/axi_skid.vhd` |
 | F4 | `sync_fifo`: synchronous FIFO, first-word-fall-through, registered output, with a defined timing contract | `vhdl/src/interface/sync_fifo.vhd` |
 | F5 | `axi_master_rd`: several read streams, one ARID per stream, a burst splitter per stream, several bursts in flight | `vhdl/src/interface/axi_master_rd.vhd` |
 | F6 | `axi_master_wr`: a burst splitter, several bursts in flight, one `done` per command | `vhdl/src/interface/axi_master_wr.vhd` |
@@ -61,7 +61,7 @@ These are the notes from the meeting, written as rules.
 | ID | Rule | How the design meets it |
 |---|---|---|
 | R1 | **One handshake per channel.** AR, R, AW, W and B each have their own valid/ready handshake. No channel waits for another channel's handshake. | AW and W are separate paths, and W beats may go out one or more cycles after AW. (`axi_lite_regs` is different: it waits for AWVALID and WVALID together.) |
-| R2 | **Valid and ready must come from flip-flops.** No combinational logic between a register and an `m_axi_*` handshake output. | ARVALID, AWVALID and WVALID come from the output register of `axi_skid` (F3). RREADY and BREADY are flip-flops held at 1 after reset; R7 makes this safe. |
+| R2 | **Valid and ready must come from flip-flops.** No combinational logic between a register and an `m_axi_*` handshake output. <br>**Our rule, for timing; stricter than AXI4.** AXI4 only forbids combinational paths from an input to an output (register → logic → output is allowed). Meeting R2 on an output also meets the AXI4 rule for it. | ARVALID, AWVALID and WVALID come from the output register of `axi_skid` (F3). RREADY and BREADY are flip-flops held at 1 after reset; R7 makes this safe. |
 | R3 | **Bursts** to fetch data fast. | INCR bursts at full bus width: AxBURST = `01`, AxSIZE = log2(data width / 8), AxLEN = beats − 1. At most 16 beats on the ZedBoard (AXI3). |
 | R4 | **No burst crosses a 4 KB page** (AXI rule: one page is one address mapping). | **The master splits** every command with `axi_pkg.burst_beats()`, at each 4 KB boundary and at `G_MAX_BURST`. Requesters never need to know the rule. `axi_mem_model` checks every burst on the bus. |
 | R5 | **Transaction IDs** for out-of-order returns. | One ARID per read **stream**. R beats are routed by RID into per-stream FIFOs ([section 6](#6-read-path-axi_master_rd)). |
@@ -396,7 +396,7 @@ burst_beats(addr, beats_left, max_burst, data_w) = min(beats_left, max_burst, be
 | AR | FF | – | `axi_skid` output register; valid and payload stay stable until ARREADY |
 | R | – | FF, constant 1 | credits (R7) |
 | AW | FF | – | `axi_skid` |
-| W | FF | – | 2-entry `axi_skid`: one beat per clock while the upstream ready is a FF as well. A plain registered ready would halve the throughput. |
+| W | FF | – | 2-entry `axi_skid`: one beat per clock while the upstream ready is a FF as well (for timing; neither AXI4 nor R2 asks for it). A plain registered ready would halve the throughput. |
 | B | – | FF, constant 1 | write outstanding counter |
 | requester `o_cmd_ready`, `o_wdata_ready`, `o_rsp_valid` | FF | FF | house style |
 

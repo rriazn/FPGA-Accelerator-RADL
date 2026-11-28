@@ -32,6 +32,27 @@ def blocked(a):
     return a.reshape(C // L, L, H, W).transpose(0, 2, 3, 1)
 
 
+def write_rom(q):
+    """Concatenated weight/bias images for the on-chip ROMs + rom_map.txt, returns the quant_pkg size constants"""
+    ws = [np.asarray(q[n + '_w']).ravel() for n, *_ in CONVS]
+    bs = [np.asarray(q[n + '_b']).ravel() for n, *_ in CONVS]
+    w_img, b_img = np.concatenate(ws), np.concatenate(bs)
+    assert w_img.size == sum(w.size for w in ws) and b_img.size == sum(b.size for b in bs)
+    write_mem(OUT / 'w_rom.mem', w_img, 8)
+    write_mem(OUT / 'b_rom.mem', b_img, 32)
+    rows = ['# name w_off w_bytes b_off b_bytes  (byte offsets: W_BASE and B_BASE of v2)\n']
+    w_off = b_off = 0
+    for (n, *_), w, b in zip(CONVS, ws, bs):
+        assert b_off % 4 == 0
+        rows.append('%s %d %d %d %d\n' % (n, w_off, w.size, b_off, 4 * b.size))
+        w_off += w.size
+        b_off += 4 * b.size
+    assert w_off == w_img.size and b_off == 4 * b_img.size
+    (OUT / 'rom_map.txt').write_text(''.join(rows))
+    return ('  constant W_ROM_BYTES : natural := %d;\n  constant B_ROM_WORDS : natural := %d;\n'
+            % (w_img.size, b_img.size))
+
+
 def golden_hw(q):
     """Hardware golden vectors for frame 0 and the frame with the largest |acc| -> golden/f<frame>/"""
     Q = {n: {k: q['%s_%s' % (n, k)] for k in ('w', 'b')} for n, *_ in CONVS}
@@ -89,6 +110,7 @@ def main():
              '   the 1/POOL_N is folded into fc_b. class = argmax of the int32 logits */\n#define POOL_N %d\n'
              % q['pool_n'])
     h.append(c_array('int8_t', 'fc_w', q['fc_w']) + c_array('int32_t', 'fc_b', q['fc_b']))
+    vhd.append(write_rom(q))
     vhd.append('end package;\n')
     # layers.txt: one row per layer for runtime loaders; b1skip is the identity shortcut of block 1
     rows = ['# name K C FY FX stride pad m0 shift  (weights: <name>_w.mem, biases: <name>_b.mem)\n']

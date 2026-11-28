@@ -96,7 +96,9 @@ Weights are int8 `[K][C][FY][FX]` row-major, biases int32 `[K]`, for each layer 
 |---|---|
 | `weights.h` | C arrays `<layer>_w`, `<layer>_b`, plus `#define`s for dims, stride, pad, `<LAYER>_M0`, `<LAYER>_SHIFT`, `B1SKIP_*`, `POOL_N`, `fc_w[2][64]`, `fc_b[2]` |
 | `<layer>_w.mem`, `<layer>_b.mem` | same data as hex, one value per line (2 digits for weights, 8 for biases, two's complement), for BRAM init |
-| `quant_pkg.vhd` | VHDL package with `M0` / `SHIFT` constants per layer |
+| `quant_pkg.vhd` | VHDL package with `M0` / `SHIFT` constants per layer and the ROM sizes `W_ROM_BYTES`, `B_ROM_WORDS` |
+| `w_rom.mem`, `b_rom.mem` | all conv layers concatenated in `CONVS` order (no FC), same hex format as the per-layer files: 76,432 int8 weights and 336 int32 biases, for the on-chip weight ROM ([weights-in-bram.md](plans/weights-in-bram.md)) |
+| `rom_map.txt` | `name w_off w_bytes b_off b_bytes` per conv layer, decimal byte offsets into the two ROM images (W_BASE and B_BASE of the v2 accelerator) |
 | `layers.txt`, `fc_w.mem`, `fc_b.mem` | layer table (`name K C FY FX stride pad m0 shift`, plus `b1skip` and `fc` rows) and the FC weights; with the `.mem` files this is everything the C baseline loads |
 | `test_x.bin` | int8 `[200][112][112]`, the test frames, already quantized |
 | `test_y.bin` | uint8 `[200]`, labels (0 = 2CH, 1 = 4CH) |

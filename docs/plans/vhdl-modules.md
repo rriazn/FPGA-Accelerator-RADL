@@ -32,8 +32,9 @@ Companion to `architecture-spec.md` (behavior, layout, registers), `architecture
 | `mac_int8` | `mac_int8.vhd` | v1 | 1.1 | Core |
 | `conv_engine_v1` | `conv_engine_v1.vhd` | v1 | 2.1 | Core |
 | `conv_accel_top` | `../conv_accel_top.vhd` | v1, target | 2.3 | Core, Sys |
-| `weight_store` | `weight_store.vhd` | target | 4.1 | Core |
-| `weight_loader` | `weight_loader.vhd` | target | 4.1 | Core |
+| `weight_rom` | `weight_rom.vhd` | v2 | 4.1 | Core |
+| `weight_store` | `weight_store.vhd` | target (4.3) | 4.1 | Core |
+| `weight_loader` | `weight_loader.vhd` | target (4.3) | 4.1 | Core |
 | `line_buffer` | `line_buffer.vhd` | target | 4.1 | Core |
 | `window_gen` | `window_gen.vhd` | target | 4.2 | Core |
 | `pe_lane` | `pe_lane.vhd` | target | 4.2 | Core |
@@ -307,7 +308,32 @@ end entity;
 
 ## Target design (steps 4.1 to 4.4)
 
-### `weight_store` (4.1)
+### `weight_rom` (4.1, v2)
+
+Plain on-chip ROMs for all conv weights (int8, byte addressed) and biases (int32, word addressed), initialized at synthesis from `w_rom.mem` and `b_rom.mem` of `export.py` (plan: [weights-in-bram.md](weights-in-bram.md)). The ports follow the BRAM contract of `conv_core_v1`, so the core's `o_w_addr`, `o_b_addr` and `i_ce` connect directly and the outputs go straight to `i_w_data` and `i_b_data`. File `weight_rom.vhd`, testbench `vhdl/tests/unit/compute-engine/tb_weight_rom.vhd`, which reads the reference image with `vhdl/tests/models/rom_image_pkg.vhd`.
+
+```vhdl
+entity weight_rom is
+  generic (
+    G_W_INIT  : string;     -- path of w_rom.mem
+    G_B_INIT  : string;     -- path of b_rom.mem
+    G_W_BYTES : positive;   -- W_ROM_BYTES from quant_pkg
+    G_B_WORDS : positive    -- B_ROM_WORDS from quant_pkg
+  );
+  port (
+    i_clk    : in  std_logic;
+    i_en     : in  std_logic;                        -- 1 samples both addresses, 0 holds both outputs
+    i_w_addr : in  unsigned(AXI_ADDR_W-1 downto 0);  -- byte offset
+    i_b_addr : in  unsigned(AXI_ADDR_W-1 downto 0);  -- byte offset, bits 1:0 ignored
+    o_w_data : out act_t;                            -- clock after i_en, 0 if i_w_addr >= G_W_BYTES
+    o_b_data : out acc_t                             -- clock after i_en, 0 if i_b_addr/4 >= G_B_WORDS
+  );
+end entity;
+```
+
+One clock read latency, no reset. The full 32 bit address is compared with the size before any `to_integer`, so addresses near 2^32 read 0 and do not abort the simulation. The init functions read exactly `G_W_BYTES` and `G_B_WORDS` non-empty lines with `hread` and fail at elaboration on a missing file or a different line count, so a wrong path never gives a ROM of zeros. Both arrays carry `rom_style = "block"`; whether Vivado finds a bare file name and keeps `hread` is checked in task 7 of the plan. The address of a layer is its offset from `rom_map.txt` (W_BASE and B_BASE of v2). The ROM is byte wide for v2; the banked layout for 4.2/4.3 is `weight_store` below.
+
+### `weight_store` (4.1, target design 4.3, not used by v2)
 
 Banked on-chip memory for weights and bias: one bank per output lane, so all weights of a given input channel for 16 output channels are read in a single cycle (16 x 9 x 8 = 1,152 bit).
 
@@ -330,7 +356,7 @@ end entity;
 
 Read latency is fixed (one or two clocks, a generic). Kernels smaller than 3x3 use the first taps and leave the rest zero. Open: the exact word layout in the banks follows from the BRAM port widths (D4, datasheet).
 
-### `weight_loader` (4.1)
+### `weight_loader` (4.1, target design 4.3, not used by v2)
 
 Reads the weight and bias image from DDR with `axi_master_rd` bursts and writes it into `weight_store`. Triggered by a layer or network start (open point 2 in the spec).
 
@@ -517,6 +543,7 @@ The width of `o_skip_data` depends on open point 6: if the requantized shortcut 
 ## Simulation only
 
 - **`axi_mem_model`**: AXI4 slave memory behind the AXI master port, preloaded from the exported files, with configurable latency and back-pressure, and a dump of its contents at the end. Implemented in `vhdl/tests/models/`: `axi_mem_model_pkg.vhd` (types), `axi_mem_model_shared.vhd` (the memory and the statistics) and `axi_mem_model.vhd` (the entity); the testbench preloads and reads back through the backdoor procedures `mem_write` and `mem_read`.
+- **`rom_image_pkg`** (`vhdl/tests/models/rom_image_pkg.vhd`): reads `w_rom.mem`, `b_rom.mem` (`read_i8_mem`, `read_i32_mem`, both fail on a wrong line count) and `rom_map.txt` (`rom_map_lookup`) for the testbenches of `weight_rom` and `conv_engine_v2`.
 - **`golden_io`**: reads the golden vectors of task 0.5 with `std.textio` (activations, weights, bias, expected accumulators and outputs) and compares them against the design's results, reporting the first mismatch.
 - **Testbenches**: one per module above (`tb_<module>.vhd`), then a layer-level testbench driving the full top level through its AXI-Lite port (task 2.2).
 

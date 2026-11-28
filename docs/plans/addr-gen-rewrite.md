@@ -1,6 +1,6 @@
 # addr_gen rewrite: where the per-layer constants come from
 
-Status 2026-11-20: **option A decided and implemented in simulation** (answers to the questions at the end). Not synthesized in Vivado and not run on the board yet. Follow-up to open point 1 of [v1-bringup-2026-11-18.md](../v1-bringup-2026-11-18.md#9-open) ("hardware precompute vs. OH/OW registers filled by the driver").
+Status 2026-11-25: **option A decided and implemented; with it the whole network runs on the board at about 66.7 MHz** (70 MHz requested, 75 MHz failed in `b2c2`; was 10 MHz, see [Result](#result)). Follow-up to open point 1 of [v1-bringup-2026-11-18.md](../v1-bringup-2026-11-18.md#9-open) ("hardware precompute vs. OH/OW registers filled by the driver").
 
 ## Problem
 
@@ -65,4 +65,19 @@ Not proposed: the driver writes every constant (about nine registers). This remo
 3. **Pointers in `addr_gen`**, which gets `i_clk`, `i_rst`, `i_start`, `i_step` and `o_at_max` of `loop_nest` (index at its last value per loop; the lowest 0 bit is the loop that advances). The setup is a separate module, `layer_setup.vhd`; it also gives `loop_nest` its `OH` and `OW`, so `loop_nest` no longer divides either.
 4. **Test:** `tb_addr_gen` drives the real `layer_setup` and `loop_nest` and compares every term with the old formulas (`elem_addr`, `out_dim` in `camus_pkg`), plus the new `tb_layer_setup`. Interfaces: [vhdl-modules.md](vhdl-modules.md#layer_setup-task-13).
 
-Still to do: Vivado synthesis (new WNS, then the clock to set on the board), `accel_golden` and `camus_accel` bit-exact on the board.
+## Result
+
+With the running-pointer `addr_gen` and `layer_setup`, v1 now runs the whole network on the board at about **66.7 MHz** (a request of 70 MHz, rounded by the PLL dividers), up from 10 MHz (6.7 times). The 79 ns path from the config registers to `s_out_addr_d1` is gone, because no division and no multiplication is left in a single clock. The frame time improved 5.2 times, not 6.7 times, because the clocks per MAC went up with the clock (see below).
+
+| | Before (v1, 2026-11-18) | After (2026-11-25, measured on the board) |
+|---|---|---|
+| PL clock | 10 MHz | about 66.7 MHz (70 MHz requested; 75 MHz failed in `b2c2`; the real value was not read back, it follows from the numbers) |
+| Critical path | about 79 ns, `addr_gen` | not recorded; the build was not timing-checked at these clocks (see below) |
+| Frame time | 176.54 s | 33.803 s (5 frames: mean 33,802.861 ms, min 33,802.670, max 33,803.083) |
+| Accelerator clocks per frame | 1,764,192,598 | 2,245,339,410 (5 frames), 2,245,340,565 (2 frames) |
+| Clocks per MAC | 47.2 | 60.1 |
+| Bit-exact | yes | yes (0 of 5 frames differ) |
+
+**The earlier prediction (about 23.5 s per frame, assuming unchanged clocks per MAC) was wrong,** and the cause is not the rewrite. The simulated clock counts of the old (`76d2584`) and the new RTL are the same with an idealized memory: tiny_a 94,874 against 94,886, tiny_b 454,190 against 454,198, tiny_e 2,624 against 2,634 clocks, which is the setup of the new `layer_setup` and nothing per MAC. On the board the DDR path (SmartConnect, HP port, memory controller) takes about the same time whatever the PL clock is, so at a faster clock the same wait costs more clocks. A two-point fit through the two measured runs gives about 45 clocks of logic plus about 230 ns of memory wait per MAC (arithmetic from two points, rough). The clock therefore has diminishing returns for v1 and the next gain has to come from fewer waits for DDR (plan steps 4.1 onward).
+
+**The timing of this build is not verified.** Vivado kept a 10 MHz (100 ns) clock constraint although `FCLK_CLK0` was set to 75 and 100 MHz in the PS block (cause not found, see [vivado-block-design.md](vivado-block-design.md) section 5), so the "longest path of about 9 ns" came from an implementation that was never asked to be fast. On the board the same bitstream worked at 10, 50 and 66.7 MHz, and failed at 75 MHz in `b2c2` (the PLL probably gave 71.4 MHz) and once in the probe at a higher clock. Still to do: a build with a real clock constraint (`vhdl/constraints/zed_fclk0_override.xdc`, not run in Vivado yet) and WNS and TNS at the target period, then the next limit in `conv_core_v1`. The target is still 200 MHz (D5), but by the fit above 200 MHz would give only about 17 s per frame (extrapolation, not measured).

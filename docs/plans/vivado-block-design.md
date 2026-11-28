@@ -117,7 +117,7 @@ The way to the board is [connect-to-board.md](../connect-to-board.md) (UART, Eth
 - [ ] Paths seen on the lab image on 2026-11-18 (Linux 4.0.0-xilinx-dev): `/dev/xdevcfg` exists, the devcfg device is `/sys/devices/soc0/amba/f8007000.devcfg` with `fclk_export`, `fclk_unexport`, `prog_done` and `is_partial_bitstream`; `/sys/class/fclk` exists and is empty until `fclk0` is exported.
 - [ ] **Load the bitstream:** on the Xilinx Linux 4.0 kernel the PL is loaded with `cat design_1_wrapper.bit.bin > /dev/xdevcfg` *(check)*. If the board rejects Vivado's `.bin`, convert the `.bit` with bootgen: a file `full.bif` containing `all:{ design_1_wrapper.bit }` and `bootgen -image full.bif -arch zynq -process_bitstream bin` *(check)*. Check that it worked: `cat /sys/devices/soc0/amba/f8007000.devcfg/prog_done` should print `1` *(check)*.
 - [ ] Typical first sign of a wrong address map or a missing PL clock: reading a register hangs the CPU. The shell cannot be interrupted (`Ctrl+C` does not work in this setup), only *Reset* helps.
-- [ ] Run, in this order (commands in the [README](../../README.md#arm-side-of-the-accelerator-c)): `accel_probe`, `accel_golden` for the small layers first (`b3sc`, `b2sc`, `stem`) and then all nine, then `camus_accel`. The package already contains `build/export/golden/f000`.
+- [ ] Run, in this order (commands in [software.md](../software.md#arm-side-of-the-accelerator-c)): `accel_probe`, `accel_golden` for the small layers first (`b3sc`, `b2sc`, `stem`) and then all nine, then `camus_accel`. The package already contains `build/export/golden/f000`.
 
 ## 7. Results sheet (fill in)
 

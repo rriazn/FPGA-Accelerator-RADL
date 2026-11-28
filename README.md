@@ -1,161 +1,85 @@
-# CNN-CAMUS: cardiac view recognition, ResNet-8 (TF 1.x, int8)
+# CNN-CAMUS: int8 ResNet-8 and a VHDL conv accelerator
 
-RADL project. This repo holds the **Python part**: dataset pipeline, training, int8 quantization and export of weights and test vectors for the C reference and the FPGA accelerator.
+RADL project. An int8 ResNet-8 classifies one 112x112 CAMUS echocardiography frame as **2-chamber (0) or 4-chamber (1) view**. The repo holds the Python pipeline (TF 1.x training, int8 quantization, export), a naive C baseline, the ARM driver, and a VHDL convolution accelerator for the Zynq (ZedBoard now, Avnet Ultra96 as the final target).
 
-## What the network does
+## Status
 
-It classifies a single grayscale echocardiography frame by **cardiac view**:
-
-| Class | Meaning |
+| | Result |
 |---|---|
-| 0 | 2-chamber view (2CH) |
-| 1 | 4-chamber view (4CH) |
+| Accuracy (200 test frames) | 95.5 % float and 95.5 % int8, target >= 90 % |
+| Naive C, ZedBoard Cortex-A9, `-O2` | about 1376 ms per frame, bit-exact (10-frame quick check, full run open) |
+| v1 accelerator on the ZedBoard | whole network bit-exact, about 66.7 MHz, 33.8 s per frame (2026-11-25) |
+| Deadline | 33 ms per frame |
 
-- **Input:** one 112x112 grayscale frame (ultrasound sector, orientation as stored in the CAMUS NIfTI files). Float model: pixel/255 in [0,1]. int8 model: `round(pixel/255*127)`, values 0..127 (scale 1/127, zero point 0).
-- **Output:** 2 logits; the class is the argmax.
-- **Data:** CAMUS, end-diastole (ED) and end-systole (ES) frames of both views: 500 patients x 2 views x 2 phases = 2,000 frames, 1,000 per class. Split **by patient** (fixed seed): 400 / 50 / 50 patients = 1,600 / 200 / 200 frames train / val / test.
-- **Result (test, 200 frames):** 95.5 % float (BN folded) and 95.5 % int8; float and int8 predictions agree on every test frame. Target was >= 90 %. With only 200 test frames, one frame is 0.5 points.
+v1 has one MAC and reads every operand straight from DDR, so it is slow by design. The next steps (bursts, line buffers, weights in BRAM) are in [docs/plans/vhdl-accelerator-tasks.md](docs/plans/vhdl-accelerator-tasks.md).
 
-### Architecture (ResNet-8, about 37.4 M MACs, 76 k weights)
+## The int8 contract
 
-All convs are followed by BN (folded into the conv before quantization). Padding is symmetric (3x3: pad 1, 1x1: pad 0). TF's `'same'` is not used, because it pads stride-2 convs on one side only.
-
-| Layer | Op | Out (C x H x W) |
-|---|---|---|
-| `stem` | 3x3 conv, stride 2, ReLU | 16 x 56 x 56 |
-| `b1c1`, `b1c2` | 3x3 conv, 16 -> 16; identity shortcut | 16 x 56 x 56 |
-| `b2c1`, `b2c2`, `b2sc` | 3x3 conv stride 2 (16 -> 32), 3x3 conv 32 -> 32; 1x1 stride-2 shortcut conv | 32 x 28 x 28 |
-| `b3c1`, `b3c2`, `b3sc` | same, 32 -> 64 | 64 x 14 x 14 |
-| pool + `fc` | global average pool, dense 64 -> 2 | 2 |
-
-Each block output is `ReLU(conv2 + shortcut)`.
-
-### int8 scheme
-
-Post-training, **symmetric, per-tensor** (weights and activations), zero point 0, so zero padding is exact. Activation ranges are the max |x| over 256 training frames.
+`python/quantize.py` defines a bit-exact int8 forward. The C baseline, the ARM driver and the accelerator must all reproduce `build/export/test_logits.bin` exactly.
 
 ```
-acc (int32)  = sum(x_q * w_q) + b_q
-y_q          = clip((acc * M0 + (1 << (SHIFT-1))) >> SHIFT, 0, 127)     # requant + ReLU, M0 is 16 bit
-block output = clip(requant(conv2 acc) + requant(shortcut), 0, 127)     # both branches to the output scale
+acc   = sum(x_q * w_q) + b_q                                  # int32, what the v1 hardware returns
+y_q   = clip((acc * M0 + (1 << (SHIFT-1))) >> SHIFT, 0, 127)  # requant + ReLU on the ARM, M0 16 bit
+block = clip(requant(conv2) + requant(shortcut), 0, 127)
 ```
 
-Block 1's identity shortcut has its own multiplier (`B1SKIP_*`). The global pool is exported as a **sum** over 14x14 = `POOL_N` = 196 positions; the 1/196 is folded into `fc_b`. Class = argmax of the int32 logits `fc_w . sum + fc_b`. `quantize.py` contains a numpy int8 forward that is bit-exact to this scheme; the C code and the accelerator must reproduce `test_logits.bin` exactly.
+Symmetric per-tensor quantization, zero point 0, symmetric padding. Network table, int8 details and file formats: [docs/software.md](docs/software.md).
 
-## Setup
+## Repository
 
-TF 1.x needs Python <= 3.7, so everything runs in Docker (CPU, TF 1.15.5, Python 3.6).
+| Path | Content |
+|---|---|
+| `python/` | `data.py` (CAMUS -> 112x112 frames), `train.py` (TF 1.x), `quantize.py` (BN folding, int8, reference forward), `export.py` (weights, `.mem`, test and golden vectors) |
+| `c/` | `camus_naive.c` (baseline), `camus_accel.c` + `accel.c` (ARM side of the accelerator), `accel_sim.c` (host stand-in), `accel_probe.c`, `accel_golden.c` (board bring-up) |
+| `vhdl/src/` | `compute-engine/` (MAC, loop nest, addr gen, conv core), `interface/` (AXI-Lite regs, AXI DDR master), top levels and block design wrappers |
+| `vhdl/tests/` | GHDL unit and integration testbenches, AXI memory model, `run_axi_regression.sh` |
+| `vhdl/constraints/` | XDC files |
+| `tools/perf_model.py` | performance and resource model |
+| `docs/` | plans, reports, board how-tos (below) |
+| `presentation/` | slides |
+
+`data/` and `build/` are generated and git-ignored.
+
+## Quick start
+
+Everything runs in Docker (TF 1.15.5 needs Python 3.6). Run from the project root, Docker Desktop running. In Bash use `$PWD` instead of `${PWD}`.
 
 ```powershell
 docker build -t radl-tf1 python
+docker run --rm -v "${PWD}:/work" -w /work/python radl-tf1 python data.py --raw /work/data/raw  # -> data/camus112.npz
+docker run --rm -v "${PWD}:/work" -w /work/python radl-tf1 python train.py                       # -> build/float_params.npz
+docker run --rm -v "${PWD}:/work" -w /work/python radl-tf1 python quantize.py                    # -> build/quant.npz
+docker run --rm -v "${PWD}:/work" -w /work/python radl-tf1 python export.py                      # -> build/export/
+docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make run         # naive C, -O0 and -O2, checks bit-exactness
+docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make run-accel   # ARM side against the host stand-in
 ```
 
-(Bash: use `$PWD` instead of `${PWD}` below.)
+The CAMUS download (Hugging Face mirror, ED/ES files only, about 350 MB) is in [docs/software.md](docs/software.md#dataset). Board packages: `make package` (naive, ARMv7), `make package-accel` (accelerator, ARMv7), `make package64` (aarch64, Ultra96).
 
-### Dataset
+VHDL regression (GHDL, from `vhdl/`): `tests/run_axi_regression.sh zedboard`.
 
-CAMUS is open but the official download needs registration and is slow. A Hugging Face mirror (`miyuki17/CAMUS_public`, a copy of the official NIfTI release; license CC BY-NC-SA 4.0, cite Leclerc et al., IEEE TMI 2019) works with the ED/ES files only, about 350 MB:
+## Documentation
 
-```powershell
-pip install huggingface_hub
-python -c "from huggingface_hub import snapshot_download as d; d('miyuki17/CAMUS_public', repo_type='dataset', allow_patterns=['database_nifti/*/*_[24]CH_E[DS].nii.gz'], local_dir='data/raw')"
-```
+**Software and results**
+- [docs/software.md](docs/software.md): network, int8 scheme, dataset, exported files, C programs and their options
+- [docs/resnet8-diagram.md](docs/resnet8-diagram.md): ResNet-8 dataflow diagram
+- [docs/deliverable-11-11.md](docs/deliverable-11-11.md): baseline deliverable, scope and measurement method
 
-Any other copy of the official layout (`patientNNNN/patientNNNN_{2CH,4CH}_{ED,ES}.nii.gz` anywhere below `data/raw`) works too.
-Do not load the mirror with `datasets.load_dataset`; that only returns a `text` column of patient IDs.
+**Accelerator design** ([docs/plans/](docs/plans/))
+- [vhdl-accelerator-tasks.md](docs/plans/vhdl-accelerator-tasks.md): task list and open decisions (start here)
+- [architecture-spec.md](docs/plans/architecture-spec.md), [architecture-diagram.md](docs/plans/architecture-diagram.md): behavior, layouts, register map, block diagrams
+- [vhdl-modules.md](docs/plans/vhdl-modules.md): module interfaces and VHDL conventions
+- [axi-interfaces.md](docs/plans/axi-interfaces.md), [axi-ddr-master.md](docs/plans/axi-ddr-master.md): control and data links
+- [addr-gen-rewrite.md](docs/plans/addr-gen-rewrite.md): per-layer constants, the fix that raised the clock from 10 to about 66.7 MHz
+- [performance-model.md](docs/plans/performance-model.md): cycle and resource estimates
+- [vivado-block-design.md](docs/plans/vivado-block-design.md): block design steps
 
-## Usage
+**Board**
+- [docs/connect-to-board.md](docs/connect-to-board.md): UART, Ethernet, jumpers
+- [docs/board-session.md](docs/board-session.md): naive C baseline on the board, checklist and results
+- [docs/run-accelerator-on-board.md](docs/run-accelerator-on-board.md): running the accelerator, start to finish
+- [docs/v1-bringup-2026-11-18.md](docs/v1-bringup-2026-11-18.md): v1 bring-up report, problems and measurements
 
-Run from the project root. Each step reads the previous step's output.
+## Data
 
-```powershell
-# -> data/camus112.npz (stops unless it finds exactly 2,000 frames, 1,000 per view, 500 patients)
-docker run --rm -v "${PWD}:/work" -w /work/python radl-tf1 python data.py --raw /work/data/raw
-# -> build/float_params.npz (prints val acc per epoch, then test acc)
-docker run --rm -v "${PWD}:/work" -w /work/python radl-tf1 python train.py
-# -> build/quant.npz (prints float and int8 test accuracy)
-docker run --rm -v "${PWD}:/work" -w /work/python radl-tf1 python quantize.py
-# -> build/export/
-docker run --rm -v "${PWD}:/work" -w /work/python radl-tf1 python export.py
-```
-
-`data.py --url <direct zip/tar link>` downloads and extracts an archive first.
-
-| File | Role |
-|---|---|
-| `python/data.py` | NIfTI -> 112x112 uint8 frames, labels, patient-wise split |
-| `python/train.py` | ResNet-8 in TF 1.x: 40 epochs, batch 32, Adam 1e-3 with cosine decay, +-6 px shift augmentation, best-validation checkpoint |
-| `python/quantize.py` | BN folding, int8 quantization, numpy float and int8 reference forward, evaluation |
-| `python/export.py` | C header, VHDL/BRAM files, test vectors |
-
-## Exported files (`build/export/`)
-
-Weights are int8 `[K][C][FY][FX]` row-major, biases int32 `[K]`, for each layer in `stem b1c1 b1c2 b2c1 b2c2 b2sc b3c1 b3c2 b3sc`.
-
-| File | Content |
-|---|---|
-| `weights.h` | C arrays `<layer>_w`, `<layer>_b`, plus `#define`s for dims, stride, pad, `<LAYER>_M0`, `<LAYER>_SHIFT`, `B1SKIP_*`, `POOL_N`, `fc_w[2][64]`, `fc_b[2]` |
-| `<layer>_w.mem`, `<layer>_b.mem` | same data as hex, one value per line (2 digits for weights, 8 for biases, two's complement), for BRAM init |
-| `quant_pkg.vhd` | VHDL package with `M0` / `SHIFT` constants per layer |
-| `layers.txt`, `fc_w.mem`, `fc_b.mem` | layer table (`name K C FY FX stride pad m0 shift`, plus `b1skip` and `fc` rows) and the FC weights; with the `.mem` files this is everything the C baseline loads |
-| `test_x.bin` | int8 `[200][112][112]`, the test frames, already quantized |
-| `test_y.bin` | uint8 `[200]`, labels (0 = 2CH, 1 = 4CH) |
-| `test_logits.bin` | little-endian int32 `[200][2]`, expected output of the int8 network |
-| `golden.npz` | int8 per-layer outputs (`gold_in`, `gold_stem`, `gold_b1h`, `gold_b1`, ...) of the first 4 test frames, for debugging a layer at a time |
-| `golden/f<frame>/` | hardware golden vectors for test frame 0 and the frame with the largest \|acc\| (currently 16, \|acc\| 89,677), hex like the `.mem` files, in the blocked layout `[C/16][H][W][16]` (the stem input is the plain `[H][W]` frame). Per conv layer: `<layer>_in.mem` (int8 input), `<layer>_acc.mem` (int32 accumulator incl. bias, what the v1 hardware writes), `<layer>_rq.mem` (int32 requant result before any clip); `b1skip_in`/`_rq` for block 1's identity shortcut. A layer's int8 output is the next layer's `_in`: `clip(rq, 0, 127)` for stem and `c1`, `clip(c2 rq + shortcut rq, 0, 127)` for a block |
-
-## Naive C baseline (`c/`)
-
-`c/camus_naive.c` is the RADL baseline: plain C11, libc only, one thread, straightforward loops with no tiling or SIMD. At run time it reads the layer table, weights and test set from `build/export/`, runs the int8 network on every test frame, and reports accuracy, latency (mean/min/max), frames over the 33 ms deadline, and whether every logit is **bit-exact** to `test_logits.bin` (exit code 1 if not). The ResNet-8 topology itself is fixed in the code.
-
-```sh
-cd c
-make run              # builds and runs camus_naive_O0 and camus_naive_O2 on ../build/export
-./camus_naive_O2 ../build/export 50   # 50 passes over the test set, e.g. for a long power measurement
-./camus_naive_O2 ../build/export 1 10 # first 10 test frames only, quick check
-```
-
-Needs gcc and make; on the board (ZedBoard, Cortex-A9) the same commands build a native ARMv7 binary. Run `python/export.py` first (it writes `layers.txt`). On the Windows dev machine there is no C compiler, so it was built and run inside the `radl-tf1` Docker image:
-
-```powershell
-docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make run
-docker run --rm -v "${PWD}:/work" -w /work/c radl-tf1 make package   # static ARMv7 binaries in c/armhf/ + build/board.tar.gz for the board
-```
-
-On the board, `c/board_run.sh` records the conditions and runs both binaries pinned to one core; see `docs/board-session.md`.
-
-Host results (x86 under Docker, not the board, so only useful as a correctness check): bit-exact on all 200 frames, 95.5 % accuracy, 278 ms/frame at `-O0` and 65 ms/frame at `-O2`. The numbers that count come from running it on the board.
-
-## ARM side of the accelerator (`c/`)
-
-`c/camus_accel.c` runs the same network with the nine conv layers on the accelerator and the rest on the ARM, as decided in D2: the accelerator returns the int32 accumulator (bias included), the ARM does requant, ReLU, residual add, global pool and FC. It uses the driver in `c/accel.c` (register map in `c/accel_regs.h`, same as `axi_lite_regs.vhd`) through a `platform_t` (registers, DMA buffers, cache flush and invalidate). There are two backends. Without options `c/accel_sim.c` is used, a software stand-in that models the register file and the result of `conv_engine_v1`, so the program checks the driver, the layouts and the ARM side on the host; it is bit-exact to `test_logits.bin` on all 200 frames (95.5 %). With `--regs` and `--mem` the same programs run on the board through `c/board_platform.c` (**written but not yet tested on a board**).
-
-```sh
-cd c
-make run-accel        # builds accel_probe and camus_accel and runs both on the stand-in
-./camus_accel ../build/export 10      # first 10 test frames only
-# on the board, as root:
-./accel_probe --regs 0x40000000 --mem 0x1F000000:0x1000000       # bring-up test, run this first
-./camus_accel ../build/export 2 --regs 0x40000000 --mem 0x1F000000:0x1000000
-```
-
-The numbers are for the ZedBoard (the board in the lab): `--regs` is the base address of `s_axi` from the Address Editor (`0x4000_0000` in the block design of 2026-11-18, other block designs may differ), and the DMA range is the top 16 MB of the 512 MB DDR, which needs `mem=496M` in the U-Boot boot arguments. For the Ultra96 block design the Address Editor showed `s_axi` at `0x8000_0000` and `HP0_DDR_LOW` at `0x0000_0000` (2026-11-18), so `--regs 0x80000000 --mem 0x7F000000:0x1000000` (top 16 MB of 2 GB).
-
-Static ARMv7 binaries (32-bit, for the ZedBoard): `make cross-accel` (in the Docker image, like `make cross`) writes `c/armhf/camus_accel`, `accel_probe` and `accel_golden`; `make package-accel` writes `build/board-accel.tar.gz` with those three, the sources, `build/export` and the golden frame `f000` (built 2026-11-18, the programs run bit-exact against the stand-in under `qemu-arm`; the older `make package` is the naive baseline and leaves the golden files out). **The Ultra96 needs 64-bit (aarch64) binaries**, the armhf ones will most likely not run there. `make cross-accel64` builds static aarch64 binaries into `c/aarch64/`, and `make package64` writes `build/board64.tar.gz` (3.5 MB: the binaries and sources, `build/export` and the golden frame `f000`, unpacks to `c/` and `build/export/`). The `radl-tf1` image has no aarch64 compiler; install it in the container first (`apt-get update && apt-get install -y gcc-aarch64-linux-gnu`), or build on the board with `make accel_probe accel_golden camus_accel`. The aarch64 build is warning free, and the binaries run bit-exact with the stand-in under `qemu-aarch64` (probe, golden layers, `camus_accel`); the board backend itself cannot be tried that way. `board_platform.c` uses only 32-bit physical addresses, which covers the Ultra96's 2 GB DDR and the PS master windows.
-
-`--regs` is the physical base address of the AXI-Lite slave (Vivado address editor), `--mem` is a range of DDR reserved for the DMA buffers as `<address>:<size>` (hex or decimal). Both are parameters because they come from the block design and the boot setup (open, D4); the addresses above are examples. About 1 MB is enough. The reserved range must be invisible to Linux (kernel `mem=` argument or a reserved-memory node in the device tree), page aligned, and below 4 GB.
-
-The board backend maps both through `/dev/mem` with `O_SYNC`, so the buffers are uncached and no cache maintenance is needed (decision A: simplest for v1, the ARM steps are slow on uncached memory, which does not matter while the hardware needs seconds per frame). Copies into DMA memory use byte accesses (`dma_copy`) because `memcpy` may use accesses an uncached mapping does not take. For a faster ARM side later: a cached mapping with kernel-side sync (`udmabuf`), or the ACP port in the block design.
-
-`c/accel_probe.c` is the bring-up test and needs no export files. It checks that STATUS is not busy, writes and reads back the layer registers with the hardware bit masks, and runs the five small layers of the VHDL testbench (lanes 1 and 16, padded channels, stride, 1x1) against a reference conv. Junk is put into the padding lanes of the input, and the padding lanes and the bytes after the output must stay untouched. On the board, check these in order: the probe, then the golden layers, then `camus_accel`.
-
-`c/accel_golden.c` is the golden-layer step: `./accel_golden ../build/export <layer> [frame]` (layers `stem b1c1 b1c2 b2c1 b2c2 b2sc b3c1 b3c2 b3sc`, default frame `f000`) runs one conv layer through the driver and compares all int32 accumulators with `build/export/golden/<frame>/<layer>_acc.mem`, the files the VHDL testbenches use. On the stand-in all nine layers are bit-exact for `f000` (`make run-accel` runs them), which also confirms the golden files against the layouts. `make package` leaves the golden directory out (13 MB); copy `build/export/golden/f000` to the board by hand. Start with the small layers (`b3sc`, `b2sc`, `stem`: about 0.4 M MACs each), the others take seconds each on v1. The block design steps are in `docs/plans/vivado-block-design.md`.
-
-Layouts: weights (`[K][C][FY][FX]` int8) and bias (int32) are the exported ones and need no conversion. The raw frame is the plain `[H][W]` image (lanes = 1). All later maps stay in the blocked `[C/16][H][W][16]` layout, which works because requant, ReLU and the residual add are elementwise; only the global pool needs the index mapping. Layers with channels that are not a multiple of 16 are not supported yet (all ResNet-8 layers are).
-
-## Open points
-
-- The requant multiplier is 16 bit (`MULT_BITS` in `quantize.py`); confirm with the FPGA owner.
-- VHDL weights are exported as `.mem` hex files, not VHDL arrays.
-- Hyperparameters (epochs, learning rate, augmentation) and the activation range statistic (`PCT`, currently max) were chosen by us, not by the plan.
-- `data/` and `build/` are generated and not meant to be committed.
+CAMUS (Leclerc et al., IEEE TMI 2019), CC BY-NC-SA 4.0. 500 patients x 2 views x ED/ES = 2,000 frames, split by patient 400/50/50.
